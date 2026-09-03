@@ -136,8 +136,11 @@ civic-mate/
 +-- requirements.txt
 +-- .env.example
 +-- README.md
++-- LICENSE       MIT
 +-- .gitignore
 +-- ARCHITECTURE.md
++-- Dockerfile
++-- infra/        App Runner IAM policies + service definition
 ```
 
 ---

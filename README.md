@@ -1,6 +1,8 @@
 # CivicMate AI
 
-Civic-assistance agent for reporting local public-service problems. See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design.
+Civic-assistance agent for reporting local public-service problems. Built with the [Strands Agents SDK](https://github.com/strands-agents/sdk-python) and Amazon Bedrock for the [Agents for Humans](https://agentsforhumans.devpost.com/) hackathon — Good Neighbor Agents track. See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design.
+
+Licensed under the [MIT License](LICENSE).
 
 ## Setup
 
