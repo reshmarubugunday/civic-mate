@@ -1,0 +1,36 @@
+{
+  "ServiceName": "civicmate",
+  "SourceConfiguration": {
+    "AutoDeploymentsEnabled": true,
+    "AuthenticationConfiguration": {
+      "AccessRoleArn": "arn:aws:iam::<ACCOUNT_ID>:role/AppRunnerECRAccessRole"
+    },
+    "ImageRepository": {
+      "ImageRepositoryType": "ECR",
+      "ImageIdentifier": "<ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com/civicmate:latest",
+      "ImageConfiguration": {
+        "Port": "8000",
+        "RuntimeEnvironmentVariables": {
+          "AWS_REGION": "<REGION>",
+          "BEDROCK_MODEL_ID": "amazon.nova-lite-v1:0",
+          "DYNAMODB_TABLE": "civicmate-complaints",
+          "S3_BUCKET": "<YOUR_BUCKET_NAME>",
+          "CIVICMATE_SESSION_SECRET": "<GENERATE_WITH_openssl_rand_-hex_32>"
+        }
+      }
+    }
+  },
+  "InstanceConfiguration": {
+    "Cpu": "1 vCPU",
+    "Memory": "2 GB",
+    "InstanceRoleArn": "arn:aws:iam::<ACCOUNT_ID>:role/CivicMateAppRunnerInstanceRole"
+  },
+  "HealthCheckConfiguration": {
+    "Protocol": "HTTP",
+    "Path": "/health",
+    "Interval": 10,
+    "Timeout": 5,
+    "HealthyThreshold": 1,
+    "UnhealthyThreshold": 5
+  }
+}
