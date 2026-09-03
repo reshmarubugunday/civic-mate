@@ -82,7 +82,7 @@
     {
       "Sid": "BedrockTesting",
       "Effect": "Allow",
-      "Action": ["bedrock:ListFoundationModels", "bedrock:GetFoundationModel", "bedrock:InvokeModel"],
+      "Action": ["bedrock:ListFoundationModels", "bedrock:GetFoundationModel", "bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"],
       "Resource": "*"
     },
     {

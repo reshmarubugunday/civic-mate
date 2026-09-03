@@ -4,6 +4,8 @@ Civic-assistance agent for reporting local public-service problems. Built with t
 
 Licensed under the [MIT License](LICENSE).
 
+**Live demo:** http://54.236.69.4:8000 — running on EC2 with real DynamoDB, S3, and Bedrock (Nova Lite) inference, not fallbacks. See "Deploy to AWS (EC2)" below for why EC2 rather than App Runner, and `ARCHITECTURE.md` section 19a for details.
+
 ## Setup
 
 ```bash
@@ -79,7 +81,54 @@ App Runner is the simplest managed way to host this: point it at a container ima
 
    `aws apprunner describe-service --service-arn <arn from the output>` shows the assigned public URL once the service reaches `RUNNING`. Auto-deployments are enabled, so pushing a new image tag to the same ECR repo redeploys automatically.
 
-4. Once Bedrock quota clears (section 19 of `ARCHITECTURE.md`), the deployed service starts using real Bedrock inference automatically — no redeploy needed, since that's a runtime fallback, not a build-time choice.
+4. Real Bedrock inference works out of the box once the instance role has `bedrock:InvokeModel` **and** `bedrock:InvokeModelWithResponseStream` (both are in `infra/apprunner-instance-permissions-policy.json` — the second one is easy to miss, since Strands' `BedrockModel` uses the streaming Converse API by default).
+
+**Note on this account:** App Runner returned `SubscriptionRequiredException` on this particular AWS account (account-level service activation, not an IAM issue — confirmed via the read-only `apprunner:ListServices` call too) — see "Deploy to AWS (EC2)" below for the fallback path actually used for the live demo. The App Runner path above is untested end-to-end on a real account as a result, though the container itself is verified (see the Dockerfile testing notes in `ARCHITECTURE.md` section 16).
+
+## Deploy to AWS (EC2)
+
+Used for the live demo after App Runner turned out to be blocked at the account level on this particular AWS account. EC2 is the most universally-available AWS compute service, so it's a reasonable fallback when a newer managed service isn't yet activated.
+
+1. Provision DynamoDB/S3 and push the app image to ECR (same as steps 1 above).
+2. **Create the instance role** (ECR pull + Bedrock + DynamoDB + S3 + AgentCore-invoke, scoped to your specific resources — fill in `infra/ec2-instance-permissions-policy.json`'s placeholders first):
+
+   ```bash
+   aws iam create-role --role-name CivicMateEC2InstanceRole \
+     --assume-role-policy-document file://infra/ec2-instance-trust-policy.json
+   aws iam put-role-policy --role-name CivicMateEC2InstanceRole \
+     --policy-name CivicMateEC2Permissions \
+     --policy-document file://infra/ec2-instance-permissions-policy.json
+   aws iam attach-role-policy --role-name CivicMateEC2InstanceRole \
+     --policy-arn arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+   aws iam create-instance-profile --instance-profile-name CivicMateEC2InstanceProfile
+   aws iam add-role-to-instance-profile --instance-profile-name CivicMateEC2InstanceProfile --role-name CivicMateEC2InstanceRole
+   ```
+
+3. **Security group** (port 8000 only — no SSH; use SSM Session Manager for shell access):
+
+   ```bash
+   VPC_ID=$(aws ec2 describe-vpcs --filters "Name=isDefault,Values=true" --query 'Vpcs[0].VpcId' --output text)
+   SG_ID=$(aws ec2 create-security-group --group-name civicmate-app-sg --description "CivicMate: allow 8000" --vpc-id $VPC_ID --query GroupId --output text)
+   aws ec2 authorize-security-group-ingress --group-id $SG_ID --protocol tcp --port 8000 --cidr 0.0.0.0/0
+   ```
+
+4. **Launch the instance.** Fill in `infra/ec2-user-data.template.sh`'s placeholders (including a fresh `openssl rand -hex 32` session secret), then:
+
+   ```bash
+   AMI_ID=$(aws ec2 describe-images --owners amazon \
+     --filters "Name=name,Values=al2023-ami-2023*-x86_64" "Name=state,Values=available" \
+     --query 'sort_by(Images, &CreationDate)[-1].ImageId' --output text)
+
+   aws ec2 run-instances --image-id $AMI_ID --instance-type t3.small \
+     --security-group-ids $SG_ID \
+     --iam-instance-profile Name=CivicMateEC2InstanceProfile \
+     --user-data file://infra/ec2-user-data.filled.sh \
+     --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=civicmate-app}]'
+   ```
+
+   Get the public IP with `aws ec2 describe-instances --instance-ids <id> --query 'Reservations[0].Instances[0].PublicIpAddress'` — the app is live at `http://<that-ip>:8000` a minute or two later (user-data installs Docker and pulls the image on first boot).
+
+5. **To redeploy after a code change:** rebuild/push the image, then `aws ssm send-command` with `AWS-RunShellScript` to `docker pull ...`, `docker stop civicmate`, `docker rm civicmate`, and re-run `docker run` — no SSH needed.
 
 ## Deploy the agent to Bedrock AgentCore Runtime (optional)
 

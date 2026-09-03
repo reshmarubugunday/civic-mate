@@ -5,3 +5,5 @@ __pycache__/
 static/uploads/*
 !static/uploads/.gitkeep
 .DS_Store
+infra/*.local.json
+infra/*.local.sh
