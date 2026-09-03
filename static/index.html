@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CivicMate AI</title>
+<style>
+  :root { color-scheme: light; --accent:#1a5b3f; --bg:#f6f7f4; --card:#fff; --border:#dfe3dd; --danger:#b3261e; --warn:#b45f06; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, sans-serif; background:var(--bg); color:#1a1a1a; }
+  header { background:var(--accent); color:#fff; padding:1rem 1.5rem; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:.5rem; }
+  header h1 { margin:0; font-size:1.3rem; }
+  header p { margin:.25rem 0 0; opacity:.85; font-size:.85rem; }
+  #whoami { font-size:.8rem; opacity:.9; }
+  #whoami button { margin-left:.5rem; padding:.2rem .5rem; font-size:.75rem; }
+  main { max-width: 780px; margin: 1.5rem auto; padding: 0 1rem; }
+  section { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:1.25rem; margin-bottom:1.25rem; }
+  h2 { margin-top:0; font-size:1.05rem; }
+  label { display:block; font-size:.85rem; font-weight:600; margin:.75rem 0 .25rem; }
+  input, textarea { width:100%; padding:.5rem; border:1px solid var(--border); border-radius:6px; font:inherit; }
+  textarea { min-height:80px; resize:vertical; }
+  button { background:var(--accent); color:#fff; border:0; border-radius:6px; padding:.55rem 1rem; font:inherit; cursor:pointer; margin-top:.75rem; }
+  button.secondary { background:#555; }
+  button.danger { background:var(--danger); }
+  button:disabled { opacity:.5; cursor:default; }
+  .row { display:flex; gap:.75rem; flex-wrap:wrap; }
+  .row > * { flex:1; min-width:180px; }
+  .hidden { display:none !important; }
+  .badge { display:inline-block; padding:.15rem .5rem; border-radius:999px; font-size:.75rem; font-weight:600; }
+  .badge.normal { background:#e2f0e6; color:var(--accent); }
+  .badge.high { background:#fdecd6; color:var(--warn); }
+  .badge.critical { background:#fbe2e0; color:var(--danger); }
+  .badge.engine-demo { background:#eee; color:#555; }
+  .badge.engine-bedrock { background:#dbe9ff; color:#1a4d8f; }
+  .badge.verified { background:#e2f0e6; color:var(--accent); }
+  .badge.unverified { background:#fdecd6; color:var(--warn); }
+  .field { font-size:.9rem; margin:.35rem 0; }
+  .field b { display:inline-block; min-width:110px; color:#444; }
+  .case { border:1px solid var(--border); border-radius:8px; padding:.75rem; margin-bottom:.75rem; }
+  .case img { max-width:80px; border-radius:6px; display:block; margin-top:.5rem; }
+  .activity { font-size:.8rem; color:#555; margin-top:.5rem; }
+  .activity li { margin:.15rem 0; }
+  .alert { border-left:3px solid var(--accent); padding:.5rem .75rem; margin-bottom:.6rem; background:#fafbf9; font-size:.85rem; }
+  .alert small { color:#777; }
+  #toast { position:fixed; bottom:1rem; right:1rem; background:#222; color:#fff; padding:.6rem 1rem; border-radius:6px; font-size:.85rem; opacity:0; transition:opacity .2s; }
+  #toast.show { opacity:1; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>CivicMate AI</h1>
+    <p>Report once. CivicMate handles the rest — you stay in control.</p>
+  </div>
+  <div id="whoami"></div>
+</header>
+
+<main>
+  <section id="signin-section">
+    <h2>Sign in</h2>
+    <p style="font-size:.85rem;color:#555">Enter your email to start or view your reports. This is not a verified login (no password/OTP yet) — it only scopes which complaints you can see.</p>
+    <label>Email</label>
+    <input id="signin-email" type="email" placeholder="you@example.com">
+    <div><button id="signin-btn">Continue</button></div>
+  </section>
+
+  <div id="app-sections" class="hidden">
+    <section id="report-section">
+      <h2>Report an issue</h2>
+      <label>What's the problem?</label>
+      <textarea id="description" placeholder="e.g. Streetlight on Main St has been out for a week"></textarea>
+      <label>Location</label>
+      <input id="location" placeholder="e.g. Main St &amp; 5th Ave">
+      <label>Photo evidence (optional, JPG/PNG/WEBP, max 5MB)</label>
+      <input id="photo" type="file" accept="image/jpeg,image/png,image/webp">
+      <img id="photo-preview" class="hidden" style="max-width:160px;border-radius:8px;margin-top:.5rem">
+      <div><button id="submit-btn">Submit report</button></div>
+    </section>
+
+    <section id="review-section" class="hidden">
+      <h2>Review before submitting</h2>
+      <div class="field"><b>Department</b> <span id="rv-department"></span></div>
+      <div class="field"><b>Priority</b> <span id="rv-priority"></span></div>
+      <div class="field"><b>Engine</b> <span id="rv-engine"></span></div>
+      <label>To (recipient) <span id="rv-verified"></span></label>
+      <input id="rv-to">
+      <label>CC (you)</label>
+      <input id="rv-cc">
+      <label>Subject</label>
+      <input id="rv-subject" disabled>
+      <label>Complaint text</label>
+      <textarea id="rv-text" disabled style="min-height:140px"></textarea>
+      <div id="rv-attachment"></div>
+      <div><button id="approve-btn">Approve &amp; submit</button>
+        <button class="secondary" id="cancel-btn">Cancel</button></div>
+    </section>
+
+    <section>
+      <div class="row" style="align-items:center">
+        <h2 style="margin:0">My reports</h2>
+        <div style="text-align:right"><button class="secondary" id="refresh-btn">Refresh</button></div>
+      </div>
+      <div id="cases"></div>
+    </section>
+
+    <section>
+      <h2>Public alerts</h2>
+      <div id="alerts"></div>
+    </section>
+  </div>
+</main>
+
+<div id="toast"></div>
+
+<script>
+const state = { pendingComplaint: null };
+
+function auth() {
+  return { email: localStorage.getItem('cm_email'), token: localStorage.getItem('cm_token') };
+}
+function authHeaders() {
+  const { email, token } = auth();
+  return { 'X-Citizen-Email': email, 'X-Citizen-Token': token };
+}
+
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 1800);
+}
+
+function priorityBadgeClass(p) {
+  if (p === 'Critical / Emergency') return 'critical';
+  if (p === 'High') return 'high';
+  return 'normal';
+}
+
+document.getElementById('signin-btn').addEventListener('click', async () => {
+  const email = document.getElementById('signin-email').value.trim();
+  if (!email || !email.includes('@')) { toast('Enter a valid email'); return; }
+  const res = await fetch('/api/session', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email }),
+  });
+  const data = await res.json();
+  localStorage.setItem('cm_email', data.citizen_email);
+  localStorage.setItem('cm_token', data.token);
+  enterApp();
+});
+
+function enterApp() {
+  const { email } = auth();
+  document.getElementById('signin-section').classList.add('hidden');
+  document.getElementById('app-sections').classList.remove('hidden');
+  document.getElementById('whoami').innerHTML = `${email} <button class="secondary" id="signout-btn">Sign out</button>`;
+  document.getElementById('signout-btn').addEventListener('click', () => {
+    localStorage.removeItem('cm_email');
+    localStorage.removeItem('cm_token');
+    location.reload();
+  });
+  loadCases();
+  loadAlerts();
+}
+
+document.getElementById('photo').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  const preview = document.getElementById('photo-preview');
+  if (!file) { preview.classList.add('hidden'); return; }
+  preview.src = URL.createObjectURL(file);
+  preview.classList.remove('hidden');
+});
+
+document.getElementById('submit-btn').addEventListener('click', async () => {
+  const description = document.getElementById('description').value.trim();
+  const location = document.getElementById('location').value.trim();
+  if (!description || !location) {
+    toast('Please fill in description and location');
+    return;
+  }
+
+  let attachment = null;
+  const file = document.getElementById('photo').files[0];
+  if (file) {
+    const fd = new FormData();
+    fd.append('file', file);
+    const res = await fetch('/api/uploads', { method: 'POST', headers: authHeaders(), body: fd });
+    if (!res.ok) { toast('Upload failed: ' + (await res.text())); return; }
+    attachment = await res.json();
+  }
+
+  const payload = {
+    description, location,
+    attachment_name: attachment?.attachment_name || null,
+    attachment_url: attachment?.attachment_url || null,
+  };
+  const res = await fetch('/api/complaints', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) { toast('Could not prepare complaint: ' + (await res.text())); return; }
+  const complaint = await res.json();
+
+  if (complaint.approved) {
+    // Server merged this into an existing open complaint (duplicate).
+    toast('This matches an existing open report — merged, no need to re-approve');
+    document.getElementById('description').value = '';
+    document.getElementById('location').value = '';
+    loadCases();
+    return;
+  }
+
+  state.pendingComplaint = complaint;
+  showReview(complaint);
+});
+
+function showReview(c) {
+  document.getElementById('report-section').classList.add('hidden');
+  document.getElementById('review-section').classList.remove('hidden');
+  document.getElementById('rv-department').textContent = c.department;
+  const pr = document.getElementById('rv-priority');
+  pr.innerHTML = `<span class="badge ${priorityBadgeClass(c.priority)}">${c.priority}</span>`;
+  const eng = document.getElementById('rv-engine');
+  const engClass = c.engine === 'Strands + Amazon Bedrock' ? 'engine-bedrock' : 'engine-demo';
+  eng.innerHTML = `<span class="badge ${engClass}">${c.engine}</span>`;
+  document.getElementById('rv-verified').innerHTML =
+    `<span class="badge ${c.recipient_verified ? 'verified' : 'unverified'}">${c.recipient_verified ? 'Directory-listed' : 'Not verified — auto-generated'}</span>`;
+  document.getElementById('rv-to').value = c.suggested_recipient_email;
+  document.getElementById('rv-cc').value = c.citizen_email;
+  document.getElementById('rv-subject').value = c.subject;
+  document.getElementById('rv-text').value = c.complaint_text;
+  const att = document.getElementById('rv-attachment');
+  att.innerHTML = c.attachment_url
+    ? `<label>Attachment</label><img src="${c.attachment_url}" style="max-width:160px;border-radius:8px">`
+    : '';
+}
+
+document.getElementById('cancel-btn').addEventListener('click', () => {
+  document.getElementById('review-section').classList.add('hidden');
+  document.getElementById('report-section').classList.remove('hidden');
+});
+
+document.getElementById('approve-btn').addEventListener('click', async () => {
+  const c = state.pendingComplaint;
+  const res = await fetch(`/api/complaints/${c.complaint_id}/approve`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({
+      final_recipient_email: document.getElementById('rv-to').value,
+      cc_email: document.getElementById('rv-cc').value,
+    }),
+  });
+  if (!res.ok) { toast('Approval failed: ' + (await res.text())); return; }
+  toast('Complaint submitted ✓');
+  document.getElementById('review-section').classList.add('hidden');
+  document.getElementById('report-section').classList.remove('hidden');
+  document.getElementById('description').value = '';
+  document.getElementById('location').value = '';
+  document.getElementById('photo').value = '';
+  document.getElementById('photo-preview').classList.add('hidden');
+  loadCases();
+});
+
+async function loadCases(showToast) {
+  const res = await fetch('/api/complaints', { headers: authHeaders() });
+  const cases = await res.json();
+  const container = document.getElementById('cases');
+  container.innerHTML = cases.length ? '' : '<p style="color:#777">No complaints yet.</p>';
+  for (const c of cases) {
+    const div = document.createElement('div');
+    div.className = 'case';
+    const engClass = c.engine === 'Strands + Amazon Bedrock' ? 'engine-bedrock' : 'engine-demo';
+    const extraReporters = c.reporters?.length ? ` · +${c.reporters.length} other report(s) merged` : '';
+    div.innerHTML = `
+      <div class="field"><b>${c.reference_number}</b>
+        <span class="badge ${priorityBadgeClass(c.priority)}">${c.priority}</span>
+        <span class="badge ${engClass}">${c.engine}</span>
+      </div>
+      <div class="field"><b>Category</b> ${c.category}${extraReporters}</div>
+      <div class="field"><b>Status</b> ${c.status}</div>
+      ${c.attachment_url ? `<img src="${c.attachment_url}">` : ''}
+      <ul class="activity">
+        ${c.activity.map(a => `<li>${new Date(a.timestamp).toLocaleString()} — ${a.event}${a.detail ? ': ' + a.detail : ''}</li>`).join('')}
+      </ul>
+      ${c.approved ? `
+        <button class="secondary" data-action="followup" data-id="${c.complaint_id}">Simulate follow-up</button>
+        <button class="danger" data-action="escalate" data-id="${c.complaint_id}">Simulate escalation</button>
+      ` : ''}
+    `;
+    container.appendChild(div);
+  }
+  if (showToast) toast('Dashboard refreshed ✓');
+}
+
+document.getElementById('cases').addEventListener('click', async (e) => {
+  const btn = e.target.closest('button[data-action]');
+  if (!btn) return;
+  const endpoint = btn.dataset.action === 'followup' ? 'simulate-followup' : 'simulate-escalation';
+  const res = await fetch(`/api/complaints/${btn.dataset.id}/${endpoint}`, { method: 'POST', headers: authHeaders() });
+  if (!res.ok) { toast('Action failed: ' + (await res.text())); return; }
+  loadCases();
+});
+
+document.getElementById('refresh-btn').addEventListener('click', () => loadCases(true));
+
+async function loadAlerts() {
+  const res = await fetch('/api/alerts');
+  const alerts = await res.json();
+  const container = document.getElementById('alerts');
+  container.innerHTML = alerts.length ? '' : '<p style="color:#777">No alerts.</p>';
+  for (const a of alerts) {
+    const div = document.createElement('div');
+    div.className = 'alert';
+    div.innerHTML = `<b>${a.subject}</b><br>${a.body}<br><small>${a.sender} · ${new Date(a.published_at).toLocaleString()}</small>`;
+    container.appendChild(div);
+  }
+}
+
+if (auth().token) enterApp();
+</script>
+</body>
+</html>
