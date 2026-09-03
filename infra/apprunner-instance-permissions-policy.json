@@ -8,6 +8,12 @@
       "Resource": "arn:aws:bedrock:<REGION>::foundation-model/amazon.nova-lite-v1:0"
     },
     {
+      "Sid": "AgentCoreInvoke",
+      "Effect": "Allow",
+      "Action": ["bedrock-agentcore:InvokeAgentRuntime"],
+      "Resource": "arn:aws:bedrock-agentcore:<REGION>:<ACCOUNT_ID>:runtime/civicmate_triage-*"
+    },
+    {
       "Sid": "DynamoDBComplaints",
       "Effect": "Allow",
       "Action": ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:Scan", "dynamodb:DescribeTable"],

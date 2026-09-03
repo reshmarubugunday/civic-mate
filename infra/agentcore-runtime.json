@@ -1,0 +1,16 @@
+{
+  "agentRuntimeName": "civicmate_triage",
+  "description": "CivicMate complaint triage agent (Strands + Amazon Bedrock)",
+  "agentRuntimeArtifact": {
+    "containerConfiguration": {
+      "containerUri": "<ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com/civicmate-agent:latest"
+    }
+  },
+  "roleArn": "arn:aws:iam::<ACCOUNT_ID>:role/CivicMateAgentCoreExecutionRole",
+  "networkConfiguration": {
+    "networkMode": "PUBLIC"
+  },
+  "protocolConfiguration": {
+    "serverProtocol": "HTTP"
+  }
+}

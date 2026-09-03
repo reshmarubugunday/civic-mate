@@ -80,3 +80,41 @@ App Runner is the simplest managed way to host this: point it at a container ima
    `aws apprunner describe-service --service-arn <arn from the output>` shows the assigned public URL once the service reaches `RUNNING`. Auto-deployments are enabled, so pushing a new image tag to the same ECR repo redeploys automatically.
 
 4. Once Bedrock quota clears (section 19 of `ARCHITECTURE.md`), the deployed service starts using real Bedrock inference automatically — no redeploy needed, since that's a runtime fallback, not a build-time choice.
+
+## Deploy the agent to Bedrock AgentCore Runtime (optional)
+
+The triage agent (`agentcore/runtime_app.py`) can run on Amazon Bedrock AgentCore Runtime instead of in-process inside the FastAPI app — the same container/ECR pattern as above, but for the agent alone. Skip this section entirely to keep running the in-process Strands agent (section above); nothing else changes if you do.
+
+AgentCore Runtime **requires ARM64 images** (the Dockerfile already pins this).
+
+1. **Build and push the agent image** (note: `-f agentcore/Dockerfile`, but the build context is the repo root, since it copies `app/tools.py`):
+
+   ```bash
+   aws ecr create-repository --repository-name civicmate-agent --region $REGION
+
+   docker buildx build --platform linux/arm64 -f agentcore/Dockerfile -t civicmate-agent .
+   docker tag civicmate-agent:latest $ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com/civicmate-agent:latest
+   docker push $ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com/civicmate-agent:latest
+   ```
+
+2. **Create the AgentCore execution role** (edit `infra/agentcore-trust-policy.json` and `infra/agentcore-execution-permissions-policy.json` first, replacing `<REGION>`, `<ACCOUNT_ID>`, `<AGENT_NAME>` with `civicmate_triage`):
+
+   ```bash
+   aws iam create-role --role-name CivicMateAgentCoreExecutionRole \
+     --assume-role-policy-document file://infra/agentcore-trust-policy.json
+   aws iam put-role-policy --role-name CivicMateAgentCoreExecutionRole \
+     --policy-name CivicMateAgentCorePermissions \
+     --policy-document file://infra/agentcore-execution-permissions-policy.json
+   ```
+
+3. **Create the AgentCore Runtime.** Edit `infra/agentcore-runtime.json`'s placeholders, then:
+
+   ```bash
+   aws bedrock-agentcore-control create-agent-runtime --cli-input-json file://infra/agentcore-runtime.json
+   ```
+
+   (Requires a recent `aws-cli` version — update with `brew upgrade awscli` if this command isn't recognized.) The response includes `agentRuntimeArn`.
+
+4. **Point the backend at it.** Add `AGENTCORE_RUNTIME_ARN=<arn from step 3>` to your `.env` (local dev) or to the App Runner service's `RuntimeEnvironmentVariables` (redeploy `infra/apprunner-service.json`), and grant the App Runner instance role `bedrock-agentcore:InvokeAgentRuntime` (already included in `infra/apprunner-instance-permissions-policy.json` — fill in the runtime ARN's account/region).
+
+`app/agent.py`'s fallback chain tries AgentCore Runtime first when `AGENTCORE_RUNTIME_ARN` is set, then falls back to the in-process Strands+Bedrock call, then the demo engine — so a misconfigured or unreachable AgentCore Runtime degrades gracefully rather than breaking the app.

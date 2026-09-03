@@ -32,6 +32,7 @@ class Status(str, Enum):
 
 
 class Engine(str, Enum):
+    AGENTCORE = "Strands + Amazon Bedrock (AgentCore Runtime)"
     BEDROCK = "Strands + Amazon Bedrock"
     DEMO = "Demo fallback (Bedrock unavailable)"
 

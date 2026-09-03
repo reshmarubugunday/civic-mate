@@ -221,7 +221,7 @@ function showReview(c) {
   const pr = document.getElementById('rv-priority');
   pr.innerHTML = `<span class="badge ${priorityBadgeClass(c.priority)}">${c.priority}</span>`;
   const eng = document.getElementById('rv-engine');
-  const engClass = c.engine === 'Strands + Amazon Bedrock' ? 'engine-bedrock' : 'engine-demo';
+  const engClass = c.engine.startsWith('Strands + Amazon Bedrock') ? 'engine-bedrock' : 'engine-demo';
   eng.innerHTML = `<span class="badge ${engClass}">${c.engine}</span>`;
   document.getElementById('rv-verified').innerHTML =
     `<span class="badge ${c.recipient_verified ? 'verified' : 'unverified'}">${c.recipient_verified ? 'Directory-listed' : 'Not verified — auto-generated'}</span>`;
@@ -268,7 +268,7 @@ async function loadCases(showToast) {
   for (const c of cases) {
     const div = document.createElement('div');
     div.className = 'case';
-    const engClass = c.engine === 'Strands + Amazon Bedrock' ? 'engine-bedrock' : 'engine-demo';
+    const engClass = c.engine.startsWith('Strands + Amazon Bedrock') ? 'engine-bedrock' : 'engine-demo';
     const extraReporters = c.reporters?.length ? ` · +${c.reporters.length} other report(s) merged` : '';
     div.innerHTML = `
       <div class="field"><b>${c.reference_number}</b>

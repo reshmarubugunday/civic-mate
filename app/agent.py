@@ -1,8 +1,11 @@
-"""CivicMate agent layer: Strands + Amazon Bedrock, with a deterministic
-fallback engine so the app keeps working when Bedrock is unavailable
-(quota pending, region mismatch, no network, etc).
+"""CivicMate agent layer: Strands + Amazon Bedrock, hosted on Amazon Bedrock
+AgentCore Runtime when configured (see agentcore/runtime_app.py and
+infra/agentcore-runtime.json), with two fallback rungs so the app keeps
+working when either AgentCore or Bedrock itself is unavailable (quota
+pending, region mismatch, no network, etc): direct in-process Strands +
+Bedrock, then a deterministic demo engine.
 
-The fallback must never be presented as a real Bedrock result — callers
+No fallback is ever presented as a real Bedrock/AgentCore result — callers
 get an explicit `engine` field back alongside the classification.
 
 Prompt-injection hardening
@@ -25,7 +28,9 @@ server-side guards enforce this regardless of what the model returns:
 """
 import json
 import logging
+import uuid
 
+import boto3
 from strands import Agent, tool
 from strands.models import BedrockModel
 
@@ -96,33 +101,67 @@ def _demo_result(description: str, location: str) -> dict:
     return _finalize(raw["category"], raw["priority"], raw["complaint_text"], Engine.DEMO)
 
 
+def _validated(raw: dict, description: str, location: str, engine: Engine) -> dict:
+    """Shared whitelist check for whatever produced `raw` (AgentCore or a
+    local Strands agent) — see the module docstring's prompt-injection note."""
+    category = raw.get("category")
+    priority = raw.get("priority")
+    if category not in t.ALLOWED_CATEGORIES or priority not in t.ALLOWED_PRIORITIES:
+        raise ValueError(
+            f"Model returned out-of-whitelist category/priority "
+            f"({category!r}/{priority!r}) — possible prompt injection, rejecting"
+        )
+    complaint_text = raw.get("complaint_text") or t.build_complaint_text(
+        description, location, category, t.resolve_department(category), priority
+    )
+    return _finalize(category, priority, complaint_text, engine)
+
+
+def _run_via_agentcore(description: str, location: str) -> dict:
+    """Invoke the deployed AgentCore Runtime (agentcore/runtime_app.py) instead
+    of building a Strands Agent in-process. See infra/agentcore-runtime.json
+    for the deployment this ARN points at."""
+    client = boto3.client("bedrock-agentcore", region_name=config.AWS_REGION)
+    payload = json.dumps({"description": description, "location": location}).encode()
+    response = client.invoke_agent_runtime(
+        agentRuntimeArn=config.AGENTCORE_RUNTIME_ARN,
+        runtimeSessionId=str(uuid.uuid4()),  # 36 chars; AgentCore requires >= 33
+        payload=payload,
+    )
+    chunks = [c.decode("utf-8") if isinstance(c, bytes) else c for c in response.get("response", [])]
+    body = json.loads("".join(chunks))
+    raw = body.get("result", body)
+    return _validated(raw, description, location, Engine.AGENTCORE)
+
+
+def _run_via_direct_bedrock(description: str, location: str) -> dict:
+    agent = _build_bedrock_agent()
+    response = agent(f"Description: {description}\nLocation: {location}")
+    text = str(response).strip()
+    start, end = text.find("{"), text.rfind("}")
+    if start == -1 or end == -1:
+        raise ValueError("No JSON object found in Bedrock response")
+    raw = json.loads(text[start:end + 1])
+    return _validated(raw, description, location, Engine.BEDROCK)
+
+
 def run_triage(description: str, location: str) -> dict:
-    """Classify and prepare a complaint, preferring Bedrock and falling
-    back to the deterministic demo engine on any failure or on a response
-    that fails the category/priority whitelist check."""
+    """Classify and prepare a complaint. Preference order: AgentCore Runtime
+    (if AGENTCORE_RUNTIME_ARN is configured) -> direct in-process Strands +
+    Bedrock -> deterministic demo engine. Each rung falls back to the next on
+    any failure, including a response that fails the category/priority
+    whitelist check (section 9a of ARCHITECTURE.md)."""
     if config.FORCE_DEMO_ENGINE:
         return _demo_result(description, location)
 
-    try:
-        agent = _build_bedrock_agent()
-        response = agent(f"Description: {description}\nLocation: {location}")
-        text = str(response).strip()
-        start, end = text.find("{"), text.rfind("}")
-        if start == -1 or end == -1:
-            raise ValueError("No JSON object found in Bedrock response")
-        raw = json.loads(text[start:end + 1])
+    if config.AGENTCORE_RUNTIME_ARN:
+        try:
+            return _run_via_agentcore(description, location)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("AgentCore Runtime unavailable, falling back to direct Bedrock: %s", exc)
 
-        category = raw.get("category")
-        priority = raw.get("priority")
-        if category not in t.ALLOWED_CATEGORIES or priority not in t.ALLOWED_PRIORITIES:
-            raise ValueError(
-                f"Model returned out-of-whitelist category/priority "
-                f"({category!r}/{priority!r}) — possible prompt injection, rejecting"
-            )
-        complaint_text = raw.get("complaint_text") or t.build_complaint_text(
-            description, location, category, t.resolve_department(category), priority
-        )
-        return _finalize(category, priority, complaint_text, Engine.BEDROCK)
+    try:
+        return _run_via_direct_bedrock(description, location)
     except Exception as exc:  # noqa: BLE001 - any Bedrock/agent/validation failure triggers fallback
         logger.warning("Bedrock triage unavailable, using demo fallback: %s", exc)
         return _demo_result(description, location)

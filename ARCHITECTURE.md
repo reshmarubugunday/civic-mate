@@ -1,11 +1,11 @@
 # CivicMate AI Architecture
 
-**Current build:** Phase 4.0 · v0.4.0
+**Current build:** Phase 4.1 · v0.4.1
 **Project type:** Citizen-facing civic complaint agent
 **Hackathon:** [Agents for Humans](https://agentsforhumans.devpost.com/) — Good Neighbor Agents track
 **Core principle:** Report once. CivicMate handles the rest — while the citizen remains in control of consequential actions.
 
-**How to read this document:** Phase 3.3 was an outline of intended design. Everything below marked **BUILT** has been implemented and exercised end-to-end (curl-tested against a running server; see each section). Everything marked **DESIGNED, NOT BUILT** is a concrete plan, not yet code. Everything marked **AWS PENDING** is built and wired but blocked on the AWS account's Bedrock quota (section 20).
+**How to read this document:** Phase 3.3 was an outline of intended design. Everything below marked **BUILT** has been implemented and exercised end-to-end (curl-tested against a running server; see each section). Everything marked **DESIGNED, NOT BUILT** is a concrete plan, not yet code. Everything marked **AWS PENDING** is built and wired but blocked on the AWS account's Bedrock quota (section 19).
 
 ---
 
@@ -99,12 +99,13 @@ Citizen's "My Reports" Dashboard + Activity History
 ### Agent Framework — BUILT
 - `strands-agents` (AWS Strands Agents SDK) 1.54+
 
-### AWS Runtime — BUILT (Bedrock inference AWS PENDING, see section 20)
-- `boto3` clients for Bedrock Runtime, DynamoDB, S3
+### AWS Runtime — BUILT (Bedrock inference AWS PENDING, see section 19)
+- `boto3` clients for Bedrock Runtime, Bedrock AgentCore, DynamoDB, S3
 - Amazon Bedrock, model id `amazon.nova-lite-v1:0` (configurable via `BEDROCK_MODEL_ID`)
+- Amazon Bedrock AgentCore Runtime (`agentcore/`) — hosts the triage agent as a standalone container, invoked from the backend via `boto3`; optional, see section 17a
 
 ### Current AI Behavior — BUILT
-`app/agent.py` attempts Strands + Bedrock on every triage request. If Bedrock is unreachable, throttled, or its output fails the safety whitelist (section 9), CivicMate uses a deterministic demo engine (`app/tools.py`) instead. The `engine` field on every complaint states which one ran — the fallback is never presented as a real Bedrock result.
+`app/agent.py` tries, in order: AgentCore Runtime (if `AGENTCORE_RUNTIME_ARN` is set) → direct in-process Strands + Bedrock → a deterministic demo engine (`app/tools.py`). Any failure — unreachable, throttled, or output that fails the safety whitelist (section 9a) — falls to the next rung. The `engine` field on every complaint states which one ran — no fallback is ever presented as a real Bedrock/AgentCore result.
 
 ---
 
@@ -124,7 +125,12 @@ civic-mate/
 |   +-- store.py      DynamoDB store, falls back to in-memory
 |   +-- evidence.py   S3 evidence store, falls back to local disk
 |   +-- tools.py      Deterministic classify/priority/routing logic
-|   +-- agent.py      Strands + Bedrock triage, with output validation (section 9)
+|   +-- agent.py      AgentCore/Bedrock triage with fallback chain + output validation (section 9a)
+|
++-- agentcore/
+|   +-- runtime_app.py  AgentCore Runtime entrypoint (section 17a)
+|   +-- requirements.txt
+|   +-- Dockerfile
 |
 +-- static/
 |   +-- index.html
@@ -139,8 +145,8 @@ civic-mate/
 +-- LICENSE       MIT
 +-- .gitignore
 +-- ARCHITECTURE.md
-+-- Dockerfile
-+-- infra/        App Runner IAM policies + service definition
++-- Dockerfile          Main FastAPI app image (App Runner)
++-- infra/              IAM policies + service/runtime definitions (App Runner + AgentCore)
 ```
 
 ---
@@ -285,19 +291,40 @@ The original Phase 3.2 design called for a full inbound pipeline: verified inbox
                               |
                               v
                     +--------------------+
-                    |      FastAPI       |
+                    |   FastAPI (App     |
+                    |   Runner)          |
                     +---------+----------+
                               |
                               v
                     +--------------------+
-                    |   Strands Agent    |----> whitelist validation (section 9a)
+                    |    app/agent.py    |
+                    |  fallback chain    |
                     +---------+----------+
                               |
-                              v
+             1. preferred     |     2. on failure, falls back to
+             +----------------+----------------+
+             v                                 v
+  +----------------------+          +------------------------+
+  |  AgentCore Runtime    |          |  Strands Agent          |
+  |  (agentcore/, own     |          |  (in-process)           |
+  |  container — 17a)     |          +-----------+-------------+
+  +-----------+----------+                       |
+              |                                  v
+              +--------------------->  +--------------------+
+                (same model,            |  Amazon Bedrock    |
+                 same whitelist         |   Nova Lite        |
+                 check — 9a)            +---------+----------+
+                                                   |
+                                        3. on failure, falls back to
+                                                   v
+                                        +--------------------+
+                                        |  Demo engine       |
+                                        |  (tools.py)        |
+                                        +--------------------+
+
                     +--------------------+
-                    |  Amazon Bedrock    |
-                    |   Nova Lite        |
-                    +--------------------+
+                    |    app/main.py     |
+                    +---------+----------+
                               |
              +----------------+----------------+
              |                                 |
@@ -308,7 +335,7 @@ The original Phase 3.2 design called for a full inbound pipeline: verified inbox
       +-------------+                   +-------------+
 ```
 
-Every AWS integration point (`store.py`, `evidence.py`, `agent.py`) tries the real service first and falls back to a local equivalent (in-memory dict, local disk, deterministic engine) on any `ClientError`/`BotoCoreError`/timeout — verified by running the full app with zero AWS credentials configured. `scripts/setup_aws.py` provisions the DynamoDB table (`PAY_PER_REQUEST`, partition key `complaint_id`) and S3 bucket (public access blocked) once credentials and a unique bucket name are available.
+Every AWS integration point (`store.py`, `evidence.py`, `agent.py`) tries the real service first and falls back to a local/simpler equivalent (in-memory dict, local disk, in-process Strands call, deterministic engine) on any `ClientError`/`BotoCoreError`/timeout — verified by running the full app with zero AWS credentials configured, and by unit-testing the AgentCore→direct-Bedrock→demo chain with mocked failures. `scripts/setup_aws.py` provisions the DynamoDB table (`PAY_PER_REQUEST`, partition key `complaint_id`) and S3 bucket (public access blocked) once credentials and a unique bucket name are available.
 
 **Known limitation, not solved here:** `DynamoDBStore.list()` does a full table `Scan()`, and `main.py` filters to the requesting citizen in Python afterward. Fine at hackathon scale; a production version should add a GSI on `citizen_email` (or a composite key layout) so listing is a `Query`, not a `Scan`.
 
@@ -316,9 +343,24 @@ Every AWS integration point (`store.py`, `evidence.py`, `agent.py`) tries the re
 
 ## 17. Strands Agent Responsibilities — BUILT
 
-`app/agent.py` exposes one tool to the agent, `classify_and_prepare(description, location)`, which wraps the deterministic `tools.py` functions (`classify_issue`, `assess_priority`, `build_complaint_text`). The system prompt explicitly tells the model the description is untrusted *data*, not an instruction (section 9a). The agent's JSON response is parsed, validated, and then **discarded in favor of server-recomputed department/recipient** — the model's only real authority is category, priority, and the prose complaint text.
+The triage logic exposes one tool to the agent, `classify_and_prepare(description, location)`, which wraps the deterministic `tools.py` functions (`classify_issue`, `assess_priority`, `build_complaint_text`). The system prompt explicitly tells the model the description is untrusted *data*, not an instruction (section 9a). The agent's JSON response is parsed, validated, and then **discarded in favor of server-recomputed department/recipient** — the model's only real authority is category, priority, and the prose complaint text. This validation happens in `app/agent.py` regardless of whether the response came from AgentCore Runtime or the in-process Strands agent — same code path, same guarantees (see `_validated()`).
 
 Future tools (unbuilt): `verify_recipient`, `submit_complaint` (real), `check_case_status`, `send_followup` (real), `escalate_case` (real).
+
+---
+
+## 17a. AgentCore Runtime Deployment — BUILT (deploy AWS PENDING)
+
+**Why a separate container, not just `agentcore create`:** Amazon Bedrock AgentCore Runtime hosts an *agent* behind a standardized invoke API — it isn't meant to serve a full web app with static files, uploads, and a database. The officially recommended `@aws/agentcore` CLI scaffolds a full CDK+Node+Python project (its own git repo, its own IaC toolchain) sized for a standalone agent product. For CivicMate, that would mean redoing the whole backend around a tool the FastAPI app doesn't otherwise need. Instead, `agentcore/` is a small, independent container — same Docker+ECR pattern already proven for the App Runner deploy (section 16) — that FastAPI calls into over `boto3`. This satisfies the hackathon's "AgentCore deployment" criterion without restructuring the working app around it.
+
+**What's in `agentcore/`:**
+- `runtime_app.py` — a `BedrockAgentCoreApp` entrypoint (`@app.entrypoint`) wrapping a Strands `Agent`. Copies `app/tools.py` in at Docker build time so the classification rules have one source of truth, but otherwise carries no dependency on the main app (no FastAPI, no boto3-based store/evidence code) — just `strands-agents` + `bedrock-agentcore`.
+- Deliberately returns only `category`, `priority`, and `complaint_text` — never department or a recipient address. `app/agent.py` is still the trust boundary: it validates the response against the same whitelist as the in-process path and always recomputes department/recipient itself (section 9a). Moving *where* the LLM call happens doesn't move *where untrusted output is trusted*.
+- **Requires an ARM64 image** — Bedrock AgentCore Runtime only runs ARM64 containers; the Dockerfile pins `--platform=linux/arm64`.
+
+**Verified locally** (without AWS credentials): the container builds, `/ping` returns healthy, and `/invocations` fails cleanly with a JSON error (not a crash) when Bedrock credentials are absent — confirmed via `docker run` + `curl`. The `app/agent.py` fallback chain (`_run_via_agentcore` → `_run_via_direct_bedrock` → demo) was verified with mocked `boto3` responses, including a mocked adversarial AgentCore response that the whitelist correctly rejected.
+
+**AWS PENDING:** actually deploying via `aws bedrock-agentcore-control create-agent-runtime` (see `infra/agentcore-runtime.json`, `infra/agentcore-trust-policy.json`, `infra/agentcore-execution-permissions-policy.json`) requires AWS credentials not yet configured in this environment — see README's "Deploy the agent to Bedrock AgentCore Runtime" section for the exact commands. Until `AGENTCORE_RUNTIME_ARN` is set, the app runs the in-process Strands path unchanged.
 
 ---
 
@@ -386,7 +428,7 @@ Unchanged from Phase 3.3 (English/Tamil initial target). Not started this phase.
 
 ---
 
-## 23. Current Phase 4.0 Scope
+## 23. Current Phase 4.1 Scope
 
 Included and verified this phase:
 
@@ -399,6 +441,9 @@ Category/priority whitelist validation on all model output
 Duplicate complaint detection and merge
 Minimal verified-sender alerts feed
 Ownership enforcement on approve/follow-up/escalate
+AgentCore Runtime deployment path (container built and tested; see 17a)
+App Runner deployment path (Docker-tested end-to-end)
+MIT LICENSE (hackathon submission requirement)
 All Phase 3.3 features (classification, routing, critical-hazard detection,
   photo evidence, approval, mock submission, follow-up/escalation sim,
   activity history, engine transparency)
@@ -414,7 +459,8 @@ Verified citizen identity (magic link / OTP)
 Geocoded duplicate detection (current match is exact-string location)
 DynamoDB GSI for per-citizen queries (current listing is a full scan filtered in Python)
 Bedrock production inference (AWS quota pending)
-AgentCore deployment
+AgentCore Runtime actually deployed (code + IAM policies ready; needs AWS credentials to run
+  `aws bedrock-agentcore-control create-agent-runtime`, see section 17a)
 Full government alerts pipeline (SPF/DKIM/DMARC, human review queue)
 Push notifications / SMS / WhatsApp
 Mobile app
@@ -458,9 +504,10 @@ Critical hazard logic           WORKING
 Bedrock                         WIRED / AWS QUOTA PENDING (section 19)
 DynamoDB                        WIRED / RUN scripts/setup_aws.py TO PROVISION
 S3                              WIRED / RUN scripts/setup_aws.py TO PROVISION
+App Runner deploy               READY / Docker-tested, needs AWS credentials to actually deploy
+AgentCore Runtime               CODE READY / NOT YET DEPLOYED (section 17a; needs AWS credentials)
 DynamoDB GSI for citizen query  PLANNED (currently full scan, filtered in Python)
 Verified citizen identity       PLANNED (magic link / OTP)
-AgentCore                       PLANNED
 Real civic integration          FUTURE
 Mobile app                      FUTURE
 Full government alerts pipeline FUTURE (current version is a scoped-down MVP)
@@ -469,4 +516,4 @@ Full government alerts pipeline FUTURE (current version is a scoped-down MVP)
 ---
 
 **Document updated:** 3 September 2026
-**Architecture baseline:** CivicMate AI Phase 4.0
+**Architecture baseline:** CivicMate AI Phase 4.1
