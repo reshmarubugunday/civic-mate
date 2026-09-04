@@ -4,7 +4,7 @@ Civic-assistance agent for reporting local public-service problems. Built with t
 
 Licensed under the [MIT License](LICENSE).
 
-**Live demo:** http://54.236.69.4:8000 — running on EC2 with real DynamoDB, S3, and Bedrock (Nova Lite) inference, not fallbacks. See "Deploy to AWS (EC2)" below for why EC2 rather than App Runner, and `ARCHITECTURE.md` section 19a for details. Magic-link sign-in currently logs the link server-side rather than emailing it (no sender identity configured by choice — see `ARCHITECTURE.md` section 19b); the send path itself is proven working end-to-end.
+**Live demo:** http://54.236.69.4:8000 — running on EC2 with real DynamoDB, S3, Bedrock (Nova Lite) inference, and SES email delivery, not fallbacks. See "Deploy to AWS (EC2)" below for why EC2 rather than App Runner, and `ARCHITECTURE.md` section 19a for details. Magic-link sign-in emails send from `trichytoday60@gmail.com`; SES is still in sandbox mode, so delivery only works to recipient addresses also verified in SES (section 19b) — everything else logs the link server-side instead of failing.
 
 ## Setup
 

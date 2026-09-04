@@ -437,9 +437,9 @@ The Phase 3.3 account's quota ticket may still be independently pending — that
 
 `scripts/setup_aws.py::ensure_ses_sender_identity()` calls `ses.verify_email_identity()` for `SES_SENDER_EMAIL`, which sends AWS's own confirmation link to that inbox — a manual click, same as any SES identity verification.
 
-**Verified working, then intentionally reverted.** A personal address was verified and used to confirm the full flow works — real SES send, real inbox delivery, real sign-in via the emailed link, end to end. It was then deliberately un-verified and removed from SES (`ses.delete_identity`): a personal inbox isn't the right long-term sender identity for a citizen-facing app, and `SES_SENDER_EMAIL` is unset again in both the local `.env` and the live deployment. **Current state:** `SES_SENDER_EMAIL` is empty, so `app/email_sender.py` logs every magic link server-side instead of emailing it — confirmed on the live deployment (`{"sent": false, ...}`). The code path for real sending is proven; it just needs a real, non-personal sender address (e.g. a dedicated project inbox, or eventually a verified domain) before turning it back on.
+**Current sender:** `trichytoday60@gmail.com` — a project-specific address, deliberately not a personal one. Verified in SES, and confirmed sending real magic-link emails on the live deployment (`{"sent": true, ...}`). Two earlier candidates were tried and abandoned first: a personal address (verified and proven working, then intentionally un-verified and removed via `ses.delete_identity` once the flow was confirmed, since a personal inbox isn't the right long-term sender), and a custom-domain address (`info@trichytoday.in`) whose verification email never arrived — likely spam-filtered or a mail-routing issue on that domain — abandoned in favor of the Gmail address rather than debugged further, given the deadline.
 
-SES accounts also start in **sandbox mode** regardless of sender: even with a verified sender, mail can only be delivered to *also-verified* recipient addresses until AWS grants production access (a request submitted through the SES console/API, on the same footing as the Bedrock quota and App Runner activation requests elsewhere in this doc — not guaranteed to clear before the hackathon deadline). Until then, real citizen-to-citizen delivery at scale isn't possible even once a permanent sender identity is chosen — only sign-in for verified/testing addresses would work.
+SES accounts also start in **sandbox mode** regardless of sender: even with a verified sender, mail can only be delivered to *also-verified* recipient addresses until AWS grants production access (a request submitted through the SES console/API, on the same footing as the Bedrock quota and App Runner activation requests elsewhere in this doc — not guaranteed to clear before the hackathon deadline). Until then, real citizen-to-citizen delivery at scale isn't possible — only sign-in for verified/testing addresses works, which is sufficient for the demo but not for real traffic.
 
 `app/email_sender.py` never breaks sign-in over any of this — it falls back to logging the link server-side rather than failing, so the flow works regardless of SES configuration, only less magical for the demo.
 
@@ -475,7 +475,8 @@ Unchanged from Phase 3.3 (English/Tamil initial target). Not started this phase.
 Included and verified this phase:
 
 ```text
-Citizen email ownership verification via single-use magic link (SES send, DynamoDB TTL token store)
+Citizen email ownership verification via single-use magic link, sending real emails live via
+  SES from a verified project sender (trichytoday60@gmail.com), DynamoDB TTL token store
 Per-citizen "my reports" dashboard (was previously a global list)
 Department directory with honest verified/unverified labeling
 Server-side recomputation of department + recipient (prompt-injection defense)
@@ -498,8 +499,8 @@ Still not production-connected (unchanged from Phase 3.3, plus new items):
 
 ```text
 Real government complaint submission
-Real email delivery — proven working end-to-end, then deliberately turned off pending a
-  non-personal sender identity; SES sandbox mode would limit it further regardless (section 19b)
+Real email delivery at scale — SES sandbox mode still restricts delivery to
+  also-verified recipient addresses until AWS grants production access (section 19b)
 Real (audited) government email directory — current directory is a seed, not an audited registry
 Geocoded duplicate detection (current match is exact-string location)
 DynamoDB GSI for per-citizen queries (current listing is a full scan filtered in Python)
@@ -532,7 +533,7 @@ Mobile app
 Frontend                        WORKING
 FastAPI API                     WORKING
 Citizen session auth            WORKING (email ownership verified via magic link — see section 8)
-SES email delivery              PROVEN, CURRENTLY OFF (no sender configured by choice; logs links instead, section 19b)
+SES email delivery              WORKING / LIVE (trichytoday60@gmail.com, sandbox mode, section 19b)
 Complaint classification        WORKING (real Bedrock confirmed live, plus demo fallback verified)
 Department directory            WORKING (seed data, not an audited registry)
 Prompt-injection guard          WORKING (verified against a mocked adversarial model response)
