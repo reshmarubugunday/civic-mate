@@ -4,7 +4,7 @@ Civic-assistance agent for reporting local public-service problems. Built with t
 
 Licensed under the [MIT License](LICENSE).
 
-**Live demo:** http://54.236.69.4:8000 — running on EC2 with real DynamoDB, S3, Bedrock (Nova Lite) inference, and SES email delivery, not fallbacks. See "Deploy to AWS (EC2)" below for why EC2 rather than App Runner, and `ARCHITECTURE.md` section 19a for details. Magic-link sign-in emails send from `trichytoday60@gmail.com`; SES is still in sandbox mode, so delivery only works to recipient addresses also verified in SES (section 19b) — everything else logs the link server-side instead of failing.
+**Live demo:** http://54.236.69.4:8000 — running on EC2 with real DynamoDB, S3, Bedrock (Nova Lite) inference, and SendGrid email delivery, not fallbacks. See "Deploy to AWS (EC2)" below for why EC2 rather than App Runner, and `ARCHITECTURE.md` section 19a for details. Magic-link sign-in emails send from `trichytoday60@gmail.com` to **any** recipient — see `ARCHITECTURE.md` section 19b for why SendGrid was chosen over SES (its sandbox mode would have required every citizen's email to be individually pre-verified, which defeats the point).
 
 ## Setup
 
@@ -12,18 +12,18 @@ Licensed under the [MIT License](LICENSE).
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env   # edit AWS_REGION / S3_BUCKET / SES_SENDER_EMAIL as needed
+cp .env.example .env   # edit AWS_REGION / S3_BUCKET / SENDER_EMAIL / SENDGRID_API_KEY as needed
 ```
 
-Configure AWS credentials (`aws configure`, or export `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`), set `SES_SENDER_EMAIL` in `.env` to an address you control, then provision everything:
+Configure AWS credentials (`aws configure`, or export `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`), then provision the AWS resources:
 
 ```bash
 python scripts/setup_aws.py
 ```
 
-This creates the DynamoDB tables (complaints + magic-link tokens) and S3 bucket, and — if `SES_SENDER_EMAIL` is set — kicks off SES sender verification, which emails **you** a confirmation link. Click it before magic-link sign-in emails can actually send.
+This creates the DynamoDB tables (complaints + magic-link tokens) and S3 bucket. For magic-link emails to actually send, sign up for a free [SendGrid](https://sendgrid.com) account, verify a sender under **Settings > Sender Authentication > Single Sender Verification** (one confirmation-link click, same idea as any email verification), create an API key, and set `SENDER_EMAIL` + `SENDGRID_API_KEY` in `.env`.
 
-**Note:** SES accounts start in sandbox mode, which only allows sending to *also-verified* recipient addresses until AWS grants production access (request it via the SES console — same kind of approval wait as the Bedrock quota). Until then, `app/email_sender.py` logs the sign-in link server-side instead of emailing it whenever SES can't deliver, so sign-in still works — check `docker logs` / server output for the link.
+**Note:** without `SENDGRID_API_KEY` configured (or if a send fails for any reason), `app/email_sender.py` logs the sign-in link server-side instead of emailing it, so sign-in still works — check `docker logs` / server output for the link.
 
 ## Run
 

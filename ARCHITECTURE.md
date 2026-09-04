@@ -120,7 +120,7 @@ civic-mate/
 |   +-- models.py     Pydantic complaint schema
 |   +-- auth.py       Citizen session tokens (see section 8)
 |   +-- magic_link.py Single-use email-verification tokens (see section 8)
-|   +-- email_sender.py  SES sending, falls back to logging the link (section 19b)
+|   +-- email_sender.py  SendGrid sending, falls back to logging the link (section 19b)
 |   +-- directory.py  Department contact directory + verification status (section 9)
 |   +-- dedup.py       Duplicate-complaint detection (section 10)
 |   +-- alerts.py      Government-to-citizen alerts feed (section 15)
@@ -214,12 +214,12 @@ Unchanged from Phase 3.3 (`app/tools.py::CATEGORY_RULES`): Street Lighting, Road
 
 **Gap closed (round 2):** that token used to be handed out for any claimed email with zero proof of mailbox ownership — typing `mayor@yourcity.gov` got you a working session for it. Fixed with a magic-link flow (`app/magic_link.py`, `app/email_sender.py`):
 
-1. `POST /api/magic-link {email}` generates a single-use, cryptographically random token (`secrets.token_urlsafe`), stores it in DynamoDB with a 15-minute TTL (auto-expiring unused links — no cleanup job needed), and emails a link containing it via SES.
+1. `POST /api/magic-link {email}` generates a single-use, cryptographically random token (`secrets.token_urlsafe`), stores it in DynamoDB with a 15-minute TTL (auto-expiring unused links — no cleanup job needed), and emails a link containing it via SendGrid.
 2. Clicking the link hits `GET /api/magic-link/verify?token=...`, which atomically checks-and-consumes the token (replay-proof — a used or expired token is rejected) and *only then* issues the real session token from `app/auth.py`.
 
 Verified locally end-to-end: request → single-use token → consume → session token works on `/api/complaints` → replaying the same token or an invalid one both correctly return `400`.
 
-**Honest limitation, by design, not oversight:** SES starts in "sandbox mode," which restricts sending to unverified recipient addresses until AWS grants production access (the same class of approval-wait as the Bedrock quota and the App Runner service activation). `app/email_sender.py` never breaks sign-in over this — if SES can't actually deliver (not configured, sender unverified, or a sandboxed recipient), it logs the link server-side instead of emailing it, and the API response says so plainly (`sent: false`) rather than claiming an email went out that didn't. See section 19b for this account's SES status.
+**Honest limitation, by design, not oversight:** `app/email_sender.py` never breaks sign-in if delivery isn't available — if SendGrid isn't configured or a send fails, it logs the link server-side instead of emailing it, and the API response says so plainly (`sent: false`) rather than claiming an email went out that didn't. See section 19b for why SendGrid rather than SES.
 
 ---
 
@@ -433,17 +433,17 @@ The Phase 3.3 account's quota ticket may still be independently pending — that
 
 ---
 
-## 19b. SES Status (Citizen Email Verification)
+## 19b. Email Delivery: Why SendGrid, Not SES
 
-`scripts/setup_aws.py::ensure_ses_sender_identity()` calls `ses.verify_email_identity()` for `SES_SENDER_EMAIL`, which sends AWS's own confirmation link to that inbox — a manual click, same as any SES identity verification.
+**SES was the first attempt, and was abandoned for a fundamental reason, not a bug:** SES accounts start in "sandbox mode," which restricts delivery to *also-verified* recipient addresses until AWS grants production access. For a citizen-facing app whose entire point is letting arbitrary strangers sign in, that's disqualifying — it would mean only pre-approved test addresses could ever receive a real magic link, not real citizens. Requesting SES production access was considered, but approval timing isn't guaranteed before the hackathon deadline (the same class of AWS-review dependency as the Bedrock quota and App Runner activation elsewhere in this doc), so it wasn't the right bet for something this central to the demo.
 
-**Current sender:** `trichytoday60@gmail.com` — a project-specific address, deliberately not a personal one. Verified in SES, and confirmed sending real magic-link emails on the live deployment (`{"sent": true, ...}`). Two earlier candidates were tried and abandoned first: a personal address (verified and proven working, then intentionally un-verified and removed via `ses.delete_identity` once the flow was confirmed, since a personal inbox isn't the right long-term sender), and a custom-domain address (`info@trichytoday.in`) whose verification email never arrived — likely spam-filtered or a mail-routing issue on that domain — abandoned in favor of the Gmail address rather than debugged further, given the deadline.
+**Along the way, SES also surfaced a real IAM bug worth recording:** the instance-role policy originally scoped `ses:SendEmail` to the sender's identity ARN only. SES's IAM authorization for `SendEmail` actually checks every identity ARN touched by the call — source *and* each recipient — so a single-identity resource restriction denied every send, including to the verified sender itself, with an `AccessDenied` naming the *recipient's* identity as the missing permission. That reads exactly like a sandbox rejection rather than an IAM misconfiguration, and cost real debugging time before the actual cause (not sandbox mode, a scoping bug) was found. Worth remembering if SES is ever reintroduced.
 
-SES accounts also start in **sandbox mode** regardless of sender: even with a verified sender, mail can only be delivered to *also-verified* recipient addresses until AWS grants production access (a request submitted through the SES console/API, on the same footing as the Bedrock quota and App Runner activation requests elsewhere in this doc — not guaranteed to clear before the hackathon deadline). Until then, real citizen-to-citizen delivery at scale isn't possible — only sign-in for verified/testing addresses works, which is sufficient for the demo but not for real traffic.
+**Landed on SendGrid instead:** its free tier uses single-sender verification (verify one address, one click) with no recipient-side restriction at all — once the sender is verified, any recipient works immediately, no AWS review, no per-citizen verification. `app/email_sender.py` calls SendGrid's REST API directly via Python's stdlib `urllib` (no new dependency). Auth is a bearer API key (`SENDGRID_API_KEY`), not an AWS credential — the EC2/App Runner instance roles no longer need any SES IAM permissions at all.
 
-`app/email_sender.py` never breaks sign-in over any of this — it falls back to logging the link server-side rather than failing, so the flow works regardless of SES configuration, only less magical for the demo.
+**Current sender:** `trichytoday60@gmail.com` — a project-specific address, deliberately not a personal one. Two earlier candidates were tried first: a personal address (proven working end-to-end in SES, then intentionally removed once confirmed — a personal inbox isn't the right long-term sender), and a custom-domain address (`info@trichytoday.in`) whose SES verification email never arrived (likely spam-filtered or a mail-routing issue on that domain) — abandoned in favor of the Gmail address rather than debugged further, given the deadline.
 
-**A third real bug, found only by live testing (like sections 9a/19's):** the instance-role policy originally scoped `ses:SendEmail` to `Resource: arn:aws:ses:...:identity/<sender>`. SES's IAM authorization for `SendEmail` checks every identity ARN touched by the call — source *and* each recipient — not just the source, so a single-identity resource restriction denied every send, including to the verified sender itself, with an `AccessDenied` naming the *recipient's* identity ARN as the missing permission (easy to misread as a sandbox rejection rather than an IAM bug). Fixed by widening `ses:SendEmail` to `Resource: "*"` in both `infra/ec2-instance-permissions-policy.json` and `infra/apprunner-instance-permissions-policy.json` — SES's own sandbox-mode recipient verification remains the real security boundary, so this isn't a meaningful least-privilege loss. Also fixed the API response to distinguish "SES not configured" from "SES configured but this recipient isn't sandbox-verified" instead of showing the same misleading "not configured" message for both.
+`app/email_sender.py` still never breaks sign-in if delivery isn't available for any reason (not configured, API error, network failure) — it logs the link server-side instead of emailing it, and the API response says so plainly (`sent: false`) rather than claiming an email went out that didn't.
 
 ---
 
@@ -478,7 +478,9 @@ Included and verified this phase:
 
 ```text
 Citizen email ownership verification via single-use magic link, sending real emails live via
-  SES from a verified project sender (trichytoday60@gmail.com), DynamoDB TTL token store
+  SendGrid from a verified project sender (trichytoday60@gmail.com) — no per-recipient
+  verification needed, unlike the SES approach tried and abandoned first (section 19b)
+DynamoDB TTL token store for magic-link tokens
 Per-citizen "my reports" dashboard (was previously a global list)
 Department directory with honest verified/unverified labeling
 Server-side recomputation of department + recipient (prompt-injection defense)
@@ -501,8 +503,9 @@ Still not production-connected (unchanged from Phase 3.3, plus new items):
 
 ```text
 Real government complaint submission
-Real email delivery at scale — SES sandbox mode still restricts delivery to
-  also-verified recipient addresses until AWS grants production access (section 19b)
+Production-grade email deliverability — sender is a verified individual Gmail address, not an
+  audited domain with SPF/DKIM/DMARC, so some providers may filter it to spam; SendGrid's free
+  tier also caps at 100 emails/day (section 19b)
 Real (audited) government email directory — current directory is a seed, not an audited registry
 Geocoded duplicate detection (current match is exact-string location)
 DynamoDB GSI for per-citizen queries (current listing is a full scan filtered in Python)
@@ -535,7 +538,7 @@ Mobile app
 Frontend                        WORKING
 FastAPI API                     WORKING
 Citizen session auth            WORKING (email ownership verified via magic link — see section 8)
-SES email delivery              WORKING / LIVE (trichytoday60@gmail.com, sandbox mode, section 19b)
+Email delivery (SendGrid)       WORKING / LIVE, any recipient (trichytoday60@gmail.com sender, section 19b)
 Complaint classification        WORKING (real Bedrock confirmed live, plus demo fallback verified)
 Department directory            WORKING (seed data, not an audited registry)
 Prompt-injection guard          WORKING (verified against a mocked adversarial model response)

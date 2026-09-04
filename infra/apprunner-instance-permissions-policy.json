@@ -26,12 +26,6 @@
       "Resource": "arn:aws:dynamodb:<REGION>:<ACCOUNT_ID>:table/civicmate-magic-links"
     },
     {
-      "Sid": "SESSendVerificationEmail",
-      "Effect": "Allow",
-      "Action": ["ses:SendEmail"],
-      "Resource": "*"
-    },
-    {
       "Sid": "S3EvidenceBucketLevel",
       "Effect": "Allow",
       "Action": ["s3:ListBucket"],

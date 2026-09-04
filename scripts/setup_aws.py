@@ -62,23 +62,6 @@ def ensure_magic_links_table():
     print("[dynamodb] table ready, TTL enabled on expires_at (unused links auto-expire)")
 
 
-def ensure_ses_sender_identity():
-    if not config.SES_SENDER_EMAIL:
-        print("[ses] SES_SENDER_EMAIL not set — skipping (magic-link emails will log instead of send)")
-        return
-    ses = boto3.client("ses", region_name=config.AWS_REGION)
-    attrs = ses.get_identity_verification_attributes(Identities=[config.SES_SENDER_EMAIL])
-    status = attrs["VerificationAttributes"].get(config.SES_SENDER_EMAIL, {}).get("VerificationStatus")
-    if status == "Success":
-        print(f"[ses] sender identity already verified: {config.SES_SENDER_EMAIL}")
-        return
-    ses.verify_email_identity(EmailAddress=config.SES_SENDER_EMAIL)
-    print(
-        f"[ses] verification email sent to {config.SES_SENDER_EMAIL} — "
-        "click the link in that inbox before magic-link emails can send."
-    )
-
-
 def ensure_s3_bucket():
     s3 = boto3.client("s3", region_name=config.AWS_REGION)
     try:
@@ -116,5 +99,10 @@ if __name__ == "__main__":
     ensure_dynamodb_table()
     ensure_magic_links_table()
     ensure_s3_bucket()
-    ensure_ses_sender_identity()
+    if not config.SENDGRID_API_KEY:
+        print(
+            "[sendgrid] SENDGRID_API_KEY not set — magic-link emails will log instead of send. "
+            "Verify a sender at app.sendgrid.com (Settings > Sender Authentication) and set "
+            "SENDGRID_API_KEY + SENDER_EMAIL in .env."
+        )
     print("\nAWS resources ready. Start the app with: uvicorn app.main:app --reload")

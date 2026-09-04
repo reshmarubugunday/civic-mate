@@ -14,9 +14,14 @@ FORCE_DEMO_ENGINE = os.getenv("FORCE_DEMO_ENGINE", "0") == "1"
 # triage falls back to a direct in-process Strands + Bedrock call (app/agent.py).
 AGENTCORE_RUNTIME_ARN = os.getenv("AGENTCORE_RUNTIME_ARN", "")
 
-# Citizen email verification (magic link, see app/magic_link.py + app/email_sender.py)
+# Citizen email verification (magic link, see app/magic_link.py + app/email_sender.py).
+# Sent via SendGrid rather than SES: SES sandbox mode requires every recipient to
+# be individually pre-verified until AWS grants production access, which defeats
+# the point of letting arbitrary citizens sign in. SendGrid's single-sender
+# verification only requires verifying the sender once, then any recipient works.
 MAGIC_LINKS_TABLE = os.getenv("MAGIC_LINKS_TABLE", "civicmate-magic-links")
-SES_SENDER_EMAIL = os.getenv("SES_SENDER_EMAIL", "")
+SENDER_EMAIL = os.getenv("SENDER_EMAIL", "")
+SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY", "")
 APP_BASE_URL = os.getenv("APP_BASE_URL", "http://localhost:8000")
 MAGIC_LINK_TTL_SECONDS = 15 * 60
 

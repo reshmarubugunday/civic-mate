@@ -97,19 +97,6 @@
       "Resource": "*"
     },
     {
-      "Sid": "SESSetupAndTesting",
-      "Effect": "Allow",
-      "Action": [
-        "ses:VerifyEmailIdentity",
-        "ses:GetIdentityVerificationAttributes",
-        "ses:ListIdentities",
-        "ses:GetSendQuota",
-        "ses:GetAccountSendingEnabled",
-        "ses:SendEmail"
-      ],
-      "Resource": "*"
-    },
-    {
       "Sid": "ProvisionMagicLinksTable",
       "Effect": "Allow",
       "Action": ["dynamodb:CreateTable", "dynamodb:DescribeTable", "dynamodb:UpdateTimeToLive"],

@@ -50,13 +50,10 @@ def request_magic_link(payload: dict):
     sent = send_magic_link(email, link_url)
     if sent:
         message = "Check your email for a sign-in link."
-    elif not config.SES_SENDER_EMAIL:
+    elif not config.SENDGRID_API_KEY or not config.SENDER_EMAIL:
         message = "Email delivery isn't configured in this environment — check server logs for the link."
     else:
-        message = (
-            "This environment's email sending is in sandbox mode and can only reach "
-            "pre-verified addresses right now — check server logs for the link."
-        )
+        message = "Email delivery failed unexpectedly — check server logs for the link."
     return {"sent": sent, "message": message}
 
 
