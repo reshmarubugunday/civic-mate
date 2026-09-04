@@ -4,7 +4,7 @@ Civic-assistance agent for reporting local public-service problems. Built with t
 
 Licensed under the [MIT License](LICENSE).
 
-**Live demo:** http://54.236.69.4:8000 — running on EC2 with real DynamoDB, S3, Bedrock (Nova Lite) inference, and Brevo email delivery, not fallbacks. See "Deploy to AWS (EC2)" below for why EC2 rather than App Runner, and `ARCHITECTURE.md` section 19a for details. Magic-link sign-in emails send from `trichytoday60@gmail.com` to **any** recipient — see `ARCHITECTURE.md` section 19b for why Brevo was chosen over SES and SendGrid (SES sandbox mode would have required every citizen's email to be individually pre-verified; SendGrid's "free" tier turned out to be a 60-day trial, not permanent).
+**Live demo:** http://54.236.69.4:8000 — running on EC2 with real DynamoDB, S3, Bedrock (Nova Lite) inference, and Brevo email delivery, not fallbacks. See "Deploy to AWS (EC2)" below for why EC2 rather than App Runner, and `ARCHITECTURE.md` section 19a for details. Magic-link sign-in emails send from `projectsbyreshma@gmail.com` to **any** recipient — see `ARCHITECTURE.md` section 19b for why Brevo was chosen over SES and SendGrid (SES sandbox mode would have required every citizen's email to be individually pre-verified; SendGrid's "free" tier turned out to be a 60-day trial, not permanent).
 
 ## Setup
 

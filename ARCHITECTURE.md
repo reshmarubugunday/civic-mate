@@ -445,9 +445,11 @@ The Phase 3.3 account's quota ticket may still be independently pending — that
 
 One more thing worth knowing about Brevo specifically: it enforces an **IP allowlist** on API keys (Security > Authorised IPs) — a send from an unrecognized IP is rejected with `401 Unauthorized`, distinct from any authentication problem with the key itself. The live EC2 instance's IP was added to this allowlist before deployment.
 
-**Confirmed live, this is the part that actually matters:** a magic-link email was sent from the deployed app to an address that has never been verified anywhere, is not the sender, and was never pre-authorized in any way — and it was delivered successfully (`{"sent": true, ...}`). This is the concrete proof that the original problem (arbitrary citizens couldn't receive real sign-in emails under SES) is actually solved, not just architecturally plausible.
+**A real gap, caught by the user rather than by testing: `sent: true` doesn't mean delivered.** Brevo's `POST /v3/smtp/email` returns `2xx` as soon as it *accepts* the request for processing — actual delivery happens asynchronously, and a rejection (e.g. an unverified sender) only shows up later in Brevo's own event log (`GET /v3/smtp/statistics/events`), not in the synchronous response `app/email_sender.py` checks. This is exactly what happened here: the sender configured (`trichytoday60@gmail.com`) had never actually been verified in Brevo — the account's real verified sender was a different address, `projectsbyreshma@gmail.com` — so every send was accepted by the API and then silently rejected (`"Sending has been rejected because the sender you used ... is not valid"`), while the app kept reporting `sent: true`. The user reported "didn't get any email" before this was caught. Fixed by correcting `SENDER_EMAIL` to the address actually verified in Brevo, then confirming a real `delivered` event in Brevo's own log — not just a `2xx` from our own API — before calling it working.
 
-**Current sender:** `trichytoday60@gmail.com` — a project-specific address, deliberately not a personal one. Two earlier candidates were tried first: a personal address (proven working end-to-end in SES, then intentionally removed once confirmed — a personal inbox isn't the right long-term sender), and a custom-domain address (`info@trichytoday.in`) whose SES verification email never arrived (likely spam-filtered or a mail-routing issue on that domain) — abandoned in favor of the Gmail address rather than debugged further, given the deadline.
+**Confirmed live, checked against Brevo's own delivery event log (not just our API's response):** a magic-link email was sent from the deployed app to an address that has never been verified anywhere, is not the sender, and was never pre-authorized in any way, and Brevo's event log shows `event: "delivered"` for it. This is the concrete proof that the original problem (arbitrary citizens couldn't receive real sign-in emails under SES) is actually solved, not just architecturally plausible — and a reminder that "the provider's API returned success" and "the email arrived" are different claims.
+
+**Current sender:** `projectsbyreshma@gmail.com` — a project-specific address, deliberately not a personal one. Two earlier candidates were tried first: a personal address (proven working end-to-end in SES, then intentionally removed once confirmed — a personal inbox isn't the right long-term sender), and a custom-domain address (`info@trichytoday.in`) whose SES verification email never arrived (likely spam-filtered or a mail-routing issue on that domain) — abandoned in favor of the Gmail address rather than debugged further, given the deadline.
 
 `app/email_sender.py` still never breaks sign-in if delivery isn't available for any reason (not configured, API error, network failure) — it logs the link server-side instead of emailing it, and the API response says so plainly (`sent: false`) rather than claiming an email went out that didn't.
 
@@ -484,7 +486,7 @@ Included and verified this phase:
 
 ```text
 Citizen email ownership verification via single-use magic link, sending real emails live via
-  Brevo from a verified project sender (trichytoday60@gmail.com) — no per-recipient
+  Brevo from a verified project sender (projectsbyreshma@gmail.com) — no per-recipient
   verification needed, unlike the SES approach tried and abandoned first (section 19b)
 DynamoDB TTL token store for magic-link tokens
 Per-citizen "my reports" dashboard (was previously a global list)
@@ -544,7 +546,7 @@ Mobile app
 Frontend                        WORKING
 FastAPI API                     WORKING
 Citizen session auth            WORKING (email ownership verified via magic link — see section 8)
-Email delivery (Brevo)             WORKING / LIVE, any recipient (trichytoday60@gmail.com sender, section 19b)
+Email delivery (Brevo)             WORKING / LIVE, any recipient (projectsbyreshma@gmail.com sender, section 19b)
 Complaint classification        WORKING (real Bedrock confirmed live, plus demo fallback verified)
 Department directory            WORKING (seed data, not an audited registry)
 Prompt-injection guard          WORKING (verified against a mocked adversarial model response)
