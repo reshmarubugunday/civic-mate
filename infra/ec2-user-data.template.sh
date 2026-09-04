@@ -27,6 +27,9 @@ docker run -d --restart unless-stopped -p 8000:8000 \
   -e BEDROCK_MODEL_ID="amazon.nova-lite-v1:0" \
   -e DYNAMODB_TABLE="civicmate-complaints" \
   -e S3_BUCKET="<YOUR_BUCKET_NAME>" \
+  -e MAGIC_LINKS_TABLE="civicmate-magic-links" \
+  -e SES_SENDER_EMAIL="<YOUR_VERIFIED_SENDER_EMAIL>" \
+  -e APP_BASE_URL="<PUBLIC_URL_e.g._http://this-instances-ip:8000>" \
   -e CIVICMATE_SESSION_SECRET="<GENERATE_WITH_openssl_rand_-hex_32>" \
   -e FORCE_DEMO_ENGINE="0" \
   --name civicmate \

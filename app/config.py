@@ -14,6 +14,12 @@ FORCE_DEMO_ENGINE = os.getenv("FORCE_DEMO_ENGINE", "0") == "1"
 # triage falls back to a direct in-process Strands + Bedrock call (app/agent.py).
 AGENTCORE_RUNTIME_ARN = os.getenv("AGENTCORE_RUNTIME_ARN", "")
 
+# Citizen email verification (magic link, see app/magic_link.py + app/email_sender.py)
+MAGIC_LINKS_TABLE = os.getenv("MAGIC_LINKS_TABLE", "civicmate-magic-links")
+SES_SENDER_EMAIL = os.getenv("SES_SENDER_EMAIL", "")
+APP_BASE_URL = os.getenv("APP_BASE_URL", "http://localhost:8000")
+MAGIC_LINK_TTL_SECONDS = 15 * 60
+
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "uploads")
 MAX_UPLOAD_BYTES = 5 * 1024 * 1024
 ALLOWED_UPLOAD_TYPES = {"image/jpeg", "image/jpg", "image/png", "image/webp"}

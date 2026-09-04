@@ -4,11 +4,12 @@ from fastapi import Depends, FastAPI, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from app import config
+from app import config, magic_link
 from app.agent import run_triage
 from app.alerts import list_alerts
 from app.auth import issue_token, require_citizen
 from app.dedup import find_duplicate
+from app.email_sender import send_magic_link
 from app.evidence import evidence_store
 from app.models import ApprovalRequest, Complaint, ComplaintCreate, Status
 from app.store import store
@@ -33,17 +34,35 @@ def health():
     }
 
 
-@app.post("/api/session")
-def create_session(payload: dict):
-    """Issue a citizen session token scoped to an email.
+@app.post("/api/magic-link")
+def request_magic_link(payload: dict):
+    """Start citizen sign-in: mail a one-time link to the given address.
 
-    Not identity-verified (no magic link/OTP) — see app/auth.py. This exists
-    to scope complaint visibility to the citizen who reported it, closing
-    the "anyone can list everyone's complaints" gap.
+    A session token (see app/auth.py) is only issued once that link is
+    clicked (GET /api/magic-link/verify) — proving mailbox ownership,
+    closing the earlier gap where any claimed email got a token outright.
     """
     email = (payload.get("email") or "").strip().lower()
     if not email or "@" not in email:
         raise HTTPException(400, "Valid email required")
+    token = magic_link.create_link_token(email)
+    link_url = f"{config.APP_BASE_URL}/?token={token}"
+    sent = send_magic_link(email, link_url)
+    return {
+        "sent": sent,
+        "message": (
+            "Check your email for a sign-in link."
+            if sent
+            else "Email delivery isn't configured in this environment — check server logs for the link."
+        ),
+    }
+
+
+@app.get("/api/magic-link/verify")
+def verify_magic_link(token: str):
+    email = magic_link.consume_link_token(token)
+    if not email:
+        raise HTTPException(400, "This link is invalid or has expired. Request a new one.")
     return {"citizen_email": email, "token": issue_token(email)}
 
 

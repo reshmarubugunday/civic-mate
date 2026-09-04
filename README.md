@@ -4,7 +4,7 @@ Civic-assistance agent for reporting local public-service problems. Built with t
 
 Licensed under the [MIT License](LICENSE).
 
-**Live demo:** http://54.236.69.4:8000 — running on EC2 with real DynamoDB, S3, and Bedrock (Nova Lite) inference, not fallbacks. See "Deploy to AWS (EC2)" below for why EC2 rather than App Runner, and `ARCHITECTURE.md` section 19a for details.
+**Live demo:** http://54.236.69.4:8000 — running on EC2 with real DynamoDB, S3, and Bedrock (Nova Lite) inference, not fallbacks. See "Deploy to AWS (EC2)" below for why EC2 rather than App Runner, and `ARCHITECTURE.md` section 19a for details. Magic-link sign-in currently logs the link server-side rather than emailing it (no sender identity configured by choice — see `ARCHITECTURE.md` section 19b); the send path itself is proven working end-to-end.
 
 ## Setup
 
@@ -12,14 +12,18 @@ Licensed under the [MIT License](LICENSE).
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env   # edit AWS_REGION / S3_BUCKET / DYNAMODB_TABLE as needed
+cp .env.example .env   # edit AWS_REGION / S3_BUCKET / SES_SENDER_EMAIL as needed
 ```
 
-Configure AWS credentials (`aws configure`, or export `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`), then provision the DynamoDB table and S3 bucket:
+Configure AWS credentials (`aws configure`, or export `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`), set `SES_SENDER_EMAIL` in `.env` to an address you control, then provision everything:
 
 ```bash
 python scripts/setup_aws.py
 ```
+
+This creates the DynamoDB tables (complaints + magic-link tokens) and S3 bucket, and — if `SES_SENDER_EMAIL` is set — kicks off SES sender verification, which emails **you** a confirmation link. Click it before magic-link sign-in emails can actually send.
+
+**Note:** SES accounts start in sandbox mode, which only allows sending to *also-verified* recipient addresses until AWS grants production access (request it via the SES console — same kind of approval wait as the Bedrock quota). Until then, `app/email_sender.py` logs the sign-in link server-side instead of emailing it whenever SES can't deliver, so sign-in still works — check `docker logs` / server output for the link.
 
 ## Run
 

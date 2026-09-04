@@ -59,10 +59,16 @@
 <main>
   <section id="signin-section">
     <h2>Sign in</h2>
-    <p style="font-size:.85rem;color:#555">Enter your email to start or view your reports. This is not a verified login (no password/OTP yet) — it only scopes which complaints you can see.</p>
+    <p style="font-size:.85rem;color:#555">Enter your email — we'll send a one-time sign-in link to prove it's yours before showing your reports.</p>
     <label>Email</label>
     <input id="signin-email" type="email" placeholder="you@example.com">
-    <div><button id="signin-btn">Continue</button></div>
+    <div><button id="signin-btn">Send sign-in link</button></div>
+    <p id="signin-message" class="hidden" style="font-size:.85rem;margin-top:.75rem"></p>
+  </section>
+
+  <section id="verifying-section" class="hidden">
+    <h2>Signing you in…</h2>
+    <p id="verify-message" style="font-size:.85rem;color:#555">Verifying your link…</p>
   </section>
 
   <div id="app-sections" class="hidden">
@@ -140,14 +146,17 @@ function priorityBadgeClass(p) {
 document.getElementById('signin-btn').addEventListener('click', async () => {
   const email = document.getElementById('signin-email').value.trim();
   if (!email || !email.includes('@')) { toast('Enter a valid email'); return; }
-  const res = await fetch('/api/session', {
+  const btn = document.getElementById('signin-btn');
+  btn.disabled = true;
+  const res = await fetch('/api/magic-link', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email }),
   });
   const data = await res.json();
-  localStorage.setItem('cm_email', data.citizen_email);
-  localStorage.setItem('cm_token', data.token);
-  enterApp();
+  btn.disabled = false;
+  const msg = document.getElementById('signin-message');
+  msg.textContent = data.message;
+  msg.classList.remove('hidden');
 });
 
 function enterApp() {
@@ -317,7 +326,32 @@ async function loadAlerts() {
   }
 }
 
-if (auth().token) enterApp();
+async function boot() {
+  const params = new URLSearchParams(location.search);
+  const linkToken = params.get('token');
+  if (linkToken) {
+    document.getElementById('signin-section').classList.add('hidden');
+    document.getElementById('verifying-section').classList.remove('hidden');
+    history.replaceState({}, '', location.pathname); // don't leave the one-time token in the URL/history
+
+    const res = await fetch(`/api/magic-link/verify?token=${encodeURIComponent(linkToken)}`);
+    if (!res.ok) {
+      document.getElementById('verify-message').textContent =
+        'This link is invalid or has expired. Request a new one below.';
+      document.getElementById('verifying-section').classList.add('hidden');
+      document.getElementById('signin-section').classList.remove('hidden');
+      return;
+    }
+    const data = await res.json();
+    localStorage.setItem('cm_email', data.citizen_email);
+    localStorage.setItem('cm_token', data.token);
+    document.getElementById('verifying-section').classList.add('hidden');
+    enterApp();
+    return;
+  }
+  if (auth().token) enterApp();
+}
+boot();
 </script>
 </body>
 </html>

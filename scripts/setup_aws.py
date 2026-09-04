@@ -37,6 +37,48 @@ def ensure_dynamodb_table():
     print("[dynamodb] table ready")
 
 
+def ensure_magic_links_table():
+    ddb = boto3.client("dynamodb", region_name=config.AWS_REGION)
+    try:
+        ddb.describe_table(TableName=config.MAGIC_LINKS_TABLE)
+        print(f"[dynamodb] table already exists: {config.MAGIC_LINKS_TABLE}")
+        return
+    except ClientError as exc:
+        if exc.response["Error"]["Code"] != "ResourceNotFoundException":
+            raise
+
+    print(f"[dynamodb] creating table: {config.MAGIC_LINKS_TABLE}")
+    ddb.create_table(
+        TableName=config.MAGIC_LINKS_TABLE,
+        KeySchema=[{"AttributeName": "token", "KeyType": "HASH"}],
+        AttributeDefinitions=[{"AttributeName": "token", "AttributeType": "S"}],
+        BillingMode="PAY_PER_REQUEST",
+    )
+    ddb.get_waiter("table_exists").wait(TableName=config.MAGIC_LINKS_TABLE)
+    ddb.update_time_to_live(
+        TableName=config.MAGIC_LINKS_TABLE,
+        TimeToLiveSpecification={"Enabled": True, "AttributeName": "expires_at"},
+    )
+    print("[dynamodb] table ready, TTL enabled on expires_at (unused links auto-expire)")
+
+
+def ensure_ses_sender_identity():
+    if not config.SES_SENDER_EMAIL:
+        print("[ses] SES_SENDER_EMAIL not set — skipping (magic-link emails will log instead of send)")
+        return
+    ses = boto3.client("ses", region_name=config.AWS_REGION)
+    attrs = ses.get_identity_verification_attributes(Identities=[config.SES_SENDER_EMAIL])
+    status = attrs["VerificationAttributes"].get(config.SES_SENDER_EMAIL, {}).get("VerificationStatus")
+    if status == "Success":
+        print(f"[ses] sender identity already verified: {config.SES_SENDER_EMAIL}")
+        return
+    ses.verify_email_identity(EmailAddress=config.SES_SENDER_EMAIL)
+    print(
+        f"[ses] verification email sent to {config.SES_SENDER_EMAIL} — "
+        "click the link in that inbox before magic-link emails can send."
+    )
+
+
 def ensure_s3_bucket():
     s3 = boto3.client("s3", region_name=config.AWS_REGION)
     try:
@@ -72,5 +114,7 @@ if __name__ == "__main__":
             "bucket name in your .env before running setup."
         )
     ensure_dynamodb_table()
+    ensure_magic_links_table()
     ensure_s3_bucket()
+    ensure_ses_sender_identity()
     print("\nAWS resources ready. Start the app with: uvicorn app.main:app --reload")

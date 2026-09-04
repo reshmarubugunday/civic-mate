@@ -1,6 +1,6 @@
 # CivicMate AI Architecture
 
-**Current build:** Phase 4.2 · v0.4.2
+**Current build:** Phase 4.3 · v0.4.3
 **Project type:** Citizen-facing civic complaint agent
 **Hackathon:** [Agents for Humans](https://agentsforhumans.devpost.com/) — Good Neighbor Agents track
 **Core principle:** Report once. CivicMate handles the rest — while the citizen remains in control of consequential actions.
@@ -33,7 +33,7 @@ The system does more than act as a chatbot. It prepares and manages a complaint 
 Citizen
   |
   v
-Sign in (email -> session token)              [app/auth.py]
+Sign in: email -> mailed one-time link -> click -> session token   [app/magic_link.py, app/auth.py]
   |
   v
 Web Interface
@@ -90,7 +90,7 @@ Citizen's "My Reports" Dashboard + Activity History
 
 ### Frontend — BUILT
 - HTML / CSS / vanilla JavaScript, single page (`static/index.html`)
-- Email sign-in step, session token stored in `localStorage`
+- Magic-link email sign-in, session token stored in `localStorage`
 - Photo preview, "my reports" dashboard, case activity timeline, public alerts feed
 
 ### Backend — BUILT
@@ -119,6 +119,8 @@ civic-mate/
 |   +-- config.py     Env-driven settings (region, table, bucket, model id)
 |   +-- models.py     Pydantic complaint schema
 |   +-- auth.py       Citizen session tokens (see section 8)
+|   +-- magic_link.py Single-use email-verification tokens (see section 8)
+|   +-- email_sender.py  SES sending, falls back to logging the link (section 19b)
 |   +-- directory.py  Department contact directory + verification status (section 9)
 |   +-- dedup.py       Duplicate-complaint detection (section 10)
 |   +-- alerts.py      Government-to-citizen alerts feed (section 15)
@@ -154,7 +156,8 @@ civic-mate/
 ## 5. API Surface — BUILT
 
 ```text
-POST /api/session                                  Issue a citizen session token
+POST /api/magic-link                                Email a one-time sign-in link
+GET  /api/magic-link/verify                         Consume that link, issue a session token
 POST /api/complaints                                Create (or merge into a duplicate)  [auth required]
 GET  /api/complaints                                List MY complaints                  [auth required]
 GET  /api/complaints/{complaint_id}                 Get one of MY complaints             [auth required]
@@ -205,15 +208,18 @@ Unchanged from Phase 3.3 (`app/tools.py::CATEGORY_RULES`): Street Lighting, Road
 
 ---
 
-## 8. Citizen Identity & Session Model — BUILT
+## 8. Citizen Identity & Session Model — BUILT (email ownership now verified)
 
-**Gap closed:** previously any client could call `GET /api/complaints` and see every citizen's complaints (emails, locations, photos).
+**Gap closed (round 1):** previously any client could call `GET /api/complaints` and see every citizen's complaints (emails, locations, photos). Fixed with an opaque per-email session token (`app/auth.py`: `token = HMAC-SHA256(server_secret, normalized_email)`) required as `X-Citizen-Email` + `X-Citizen-Token` on every complaint-touching endpoint.
 
-`app/auth.py` issues an opaque session token per email: `token = HMAC-SHA256(server_secret, normalized_email)`. Every complaint-touching endpoint requires `X-Citizen-Email` + `X-Citizen-Token` and rejects a mismatch with `401`. Complaint visibility and mutation are scoped to `citizen_email == complaint.citizen_email or citizen_email in complaint.reporters`.
+**Gap closed (round 2):** that token used to be handed out for any claimed email with zero proof of mailbox ownership — typing `mayor@yourcity.gov` got you a working session for it. Fixed with a magic-link flow (`app/magic_link.py`, `app/email_sender.py`):
 
-**What this is not:** verified identity. There is no password, magic link, or OTP — claiming an email is enough to get a token for it, because deriving the token requires the server secret (unknown to the client), but the server itself doesn't check mailbox ownership before issuing one. This is stated explicitly in the sign-in UI copy so it isn't mistaken for real auth.
+1. `POST /api/magic-link {email}` generates a single-use, cryptographically random token (`secrets.token_urlsafe`), stores it in DynamoDB with a 15-minute TTL (auto-expiring unused links — no cleanup job needed), and emails a link containing it via SES.
+2. Clicking the link hits `GET /api/magic-link/verify?token=...`, which atomically checks-and-consumes the token (replay-proof — a used or expired token is rejected) and *only then* issues the real session token from `app/auth.py`.
 
-**DESIGNED, NOT BUILT — production hardening path:** send the token via a verified email magic link or OTP instead of returning it directly in the `/api/session` response, so the token proves mailbox ownership rather than claimed ownership.
+Verified locally end-to-end: request → single-use token → consume → session token works on `/api/complaints` → replaying the same token or an invalid one both correctly return `400`.
+
+**Honest limitation, by design, not oversight:** SES starts in "sandbox mode," which restricts sending to unverified recipient addresses until AWS grants production access (the same class of approval-wait as the Bedrock quota and the App Runner service activation). `app/email_sender.py` never breaks sign-in over this — if SES can't actually deliver (not configured, sender unverified, or a sandboxed recipient), it logs the link server-side instead of emailing it, and the API response says so plainly (`sent: false`) rather than claiming an email went out that didn't. See section 19b for this account's SES status.
 
 ---
 
@@ -427,6 +433,18 @@ The Phase 3.3 account's quota ticket may still be independently pending — that
 
 ---
 
+## 19b. SES Status (Citizen Email Verification)
+
+`scripts/setup_aws.py::ensure_ses_sender_identity()` calls `ses.verify_email_identity()` for `SES_SENDER_EMAIL`, which sends AWS's own confirmation link to that inbox — a manual click, same as any SES identity verification.
+
+**Verified working, then intentionally reverted.** A personal address was verified and used to confirm the full flow works — real SES send, real inbox delivery, real sign-in via the emailed link, end to end. It was then deliberately un-verified and removed from SES (`ses.delete_identity`): a personal inbox isn't the right long-term sender identity for a citizen-facing app, and `SES_SENDER_EMAIL` is unset again in both the local `.env` and the live deployment. **Current state:** `SES_SENDER_EMAIL` is empty, so `app/email_sender.py` logs every magic link server-side instead of emailing it — confirmed on the live deployment (`{"sent": false, ...}`). The code path for real sending is proven; it just needs a real, non-personal sender address (e.g. a dedicated project inbox, or eventually a verified domain) before turning it back on.
+
+SES accounts also start in **sandbox mode** regardless of sender: even with a verified sender, mail can only be delivered to *also-verified* recipient addresses until AWS grants production access (a request submitted through the SES console/API, on the same footing as the Bedrock quota and App Runner activation requests elsewhere in this doc — not guaranteed to clear before the hackathon deadline). Until then, real citizen-to-citizen delivery at scale isn't possible even once a permanent sender identity is chosen — only sign-in for verified/testing addresses would work.
+
+`app/email_sender.py` never breaks sign-in over any of this — it falls back to logging the link server-side rather than failing, so the flow works regardless of SES configuration, only less magical for the demo.
+
+---
+
 ## 20. Security Principles
 
 - Do not use root access keys; do not commit AWS credentials; prefer least-privilege IAM.
@@ -435,6 +453,7 @@ The Phase 3.3 account's quota ticket may still be independently pending — that
 - Citizen free text is treated as untrusted data, never as instructions to the agent (section 9a) — validated server-side before it can affect routing.
 - No manually-entered or auto-generated recipient address is ever presented as a verified government address; directory verification (section 9) is explicitly scoped to "curated by CivicMate," not "confirmed real."
 - Complaint visibility and mutation are scoped per citizen session (section 8); ownership failures return `404`, not `403`, to avoid confirming record existence to non-owners.
+- Session tokens are only issued after proving mailbox ownership via a single-use, time-limited magic link (section 8) — not for merely claiming an email.
 - Require citizen approval for consequential complaint submission (unchanged from Phase 3.3).
 
 ---
@@ -451,12 +470,12 @@ Unchanged from Phase 3.3 (English/Tamil initial target). Not started this phase.
 
 ---
 
-## 23. Current Phase 4.2 Scope
+## 23. Current Phase 4.3 Scope
 
 Included and verified this phase:
 
 ```text
-Citizen session auth (email-scoped, not identity-verified)
+Citizen email ownership verification via single-use magic link (SES send, DynamoDB TTL token store)
 Per-citizen "my reports" dashboard (was previously a global list)
 Department directory with honest verified/unverified labeling
 Server-side recomputation of department + recipient (prompt-injection defense)
@@ -479,9 +498,9 @@ Still not production-connected (unchanged from Phase 3.3, plus new items):
 
 ```text
 Real government complaint submission
-Real email delivery
+Real email delivery — proven working end-to-end, then deliberately turned off pending a
+  non-personal sender identity; SES sandbox mode would limit it further regardless (section 19b)
 Real (audited) government email directory — current directory is a seed, not an audited registry
-Verified citizen identity (magic link / OTP)
 Geocoded duplicate detection (current match is exact-string location)
 DynamoDB GSI for per-citizen queries (current listing is a full scan filtered in Python)
 App Runner deploy (code/IAM ready; blocked on this AWS account's service activation, see 19a)
@@ -512,7 +531,8 @@ Mobile app
 ```text
 Frontend                        WORKING
 FastAPI API                     WORKING
-Citizen session auth            WORKING (not identity-verified — see section 8)
+Citizen session auth            WORKING (email ownership verified via magic link — see section 8)
+SES email delivery              PROVEN, CURRENTLY OFF (no sender configured by choice; logs links instead, section 19b)
 Complaint classification        WORKING (real Bedrock confirmed live, plus demo fallback verified)
 Department directory            WORKING (seed data, not an audited registry)
 Prompt-injection guard          WORKING (verified against a mocked adversarial model response)
@@ -544,4 +564,4 @@ Full government alerts pipeline FUTURE (current version is a scoped-down MVP)
 ---
 
 **Document updated:** 3 September 2026 (deployment session)
-**Architecture baseline:** CivicMate AI Phase 4.2
+**Architecture baseline:** CivicMate AI Phase 4.3
