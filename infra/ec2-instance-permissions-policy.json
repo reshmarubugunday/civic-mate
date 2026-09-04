@@ -41,7 +41,7 @@
       "Sid": "SESSendVerificationEmail",
       "Effect": "Allow",
       "Action": ["ses:SendEmail"],
-      "Resource": "arn:aws:ses:<REGION>:<ACCOUNT_ID>:identity/<SENDER_EMAIL>"
+      "Resource": "*"
     },
     {
       "Sid": "S3EvidenceBucketLevel",

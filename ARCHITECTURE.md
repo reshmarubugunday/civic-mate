@@ -443,6 +443,8 @@ SES accounts also start in **sandbox mode** regardless of sender: even with a ve
 
 `app/email_sender.py` never breaks sign-in over any of this — it falls back to logging the link server-side rather than failing, so the flow works regardless of SES configuration, only less magical for the demo.
 
+**A third real bug, found only by live testing (like sections 9a/19's):** the instance-role policy originally scoped `ses:SendEmail` to `Resource: arn:aws:ses:...:identity/<sender>`. SES's IAM authorization for `SendEmail` checks every identity ARN touched by the call — source *and* each recipient — not just the source, so a single-identity resource restriction denied every send, including to the verified sender itself, with an `AccessDenied` naming the *recipient's* identity ARN as the missing permission (easy to misread as a sandbox rejection rather than an IAM bug). Fixed by widening `ses:SendEmail` to `Resource: "*"` in both `infra/ec2-instance-permissions-policy.json` and `infra/apprunner-instance-permissions-policy.json` — SES's own sandbox-mode recipient verification remains the real security boundary, so this isn't a meaningful least-privilege loss. Also fixed the API response to distinguish "SES not configured" from "SES configured but this recipient isn't sandbox-verified" instead of showing the same misleading "not configured" message for both.
+
 ---
 
 ## 20. Security Principles

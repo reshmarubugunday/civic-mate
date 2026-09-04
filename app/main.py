@@ -48,14 +48,16 @@ def request_magic_link(payload: dict):
     token = magic_link.create_link_token(email)
     link_url = f"{config.APP_BASE_URL}/?token={token}"
     sent = send_magic_link(email, link_url)
-    return {
-        "sent": sent,
-        "message": (
-            "Check your email for a sign-in link."
-            if sent
-            else "Email delivery isn't configured in this environment — check server logs for the link."
-        ),
-    }
+    if sent:
+        message = "Check your email for a sign-in link."
+    elif not config.SES_SENDER_EMAIL:
+        message = "Email delivery isn't configured in this environment — check server logs for the link."
+    else:
+        message = (
+            "This environment's email sending is in sandbox mode and can only reach "
+            "pre-verified addresses right now — check server logs for the link."
+        )
+    return {"sent": sent, "message": message}
 
 
 @app.get("/api/magic-link/verify")
