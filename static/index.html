@@ -32,8 +32,8 @@
   .badge.critical { background:#fbe2e0; color:var(--danger); }
   .badge.engine-demo { background:#eee; color:#555; }
   .badge.engine-bedrock { background:#dbe9ff; color:#1a4d8f; }
-  .badge.verified { background:#e2f0e6; color:var(--accent); }
-  .badge.unverified { background:#fdecd6; color:var(--warn); }
+  .badge.unverified { background:#fbe2e0; color:var(--danger); }
+  #demo-banner { background:#fbe2e0; color:var(--danger); padding:.6rem 1.5rem; font-size:.85rem; font-weight:600; text-align:center; }
   .field { font-size:.9rem; margin:.35rem 0; }
   .field b { display:inline-block; min-width:110px; color:#444; }
   .case { border:1px solid var(--border); border-radius:8px; padding:.75rem; margin-bottom:.75rem; }
@@ -54,6 +54,7 @@
   </div>
   <div id="whoami"></div>
 </header>
+<div id="demo-banner">⚠ Demo mode: no complaint is sent anywhere. Recipient addresses shown are not real, verified government contacts.</div>
 
 <main>
   <section id="signin-section">
@@ -224,7 +225,7 @@ function showReview(c) {
   const engClass = c.engine.startsWith('Strands + Amazon Bedrock') ? 'engine-bedrock' : 'engine-demo';
   eng.innerHTML = `<span class="badge ${engClass}">${c.engine}</span>`;
   document.getElementById('rv-verified').innerHTML =
-    `<span class="badge ${c.recipient_verified ? 'verified' : 'unverified'}">${c.recipient_verified ? 'Directory-listed' : 'Not verified — auto-generated'}</span>`;
+    `<span class="badge unverified">⚠ NOT a real government email (${c.recipient_verified ? 'curated demo address' : 'auto-guessed address'})</span>`;
   document.getElementById('rv-to').value = c.suggested_recipient_email;
   document.getElementById('rv-cc').value = c.citizen_email;
   document.getElementById('rv-subject').value = c.subject;
@@ -277,6 +278,7 @@ async function loadCases(showToast) {
       </div>
       <div class="field"><b>Category</b> ${c.category}${extraReporters}</div>
       <div class="field"><b>Status</b> ${c.status}</div>
+      ${c.approved ? `<div class="field"><b>Sent to</b> ${c.final_recipient_email} <span class="badge unverified">⚠ not a real government email</span></div>` : ''}
       ${c.attachment_url ? `<img src="${c.attachment_url}">` : ''}
       <ul class="activity">
         ${c.activity.map(a => `<li>${new Date(a.timestamp).toLocaleString()} — ${a.event}${a.detail ? ': ' + a.detail : ''}</li>`).join('')}
