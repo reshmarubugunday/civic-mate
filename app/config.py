@@ -15,13 +15,14 @@ FORCE_DEMO_ENGINE = os.getenv("FORCE_DEMO_ENGINE", "0") == "1"
 AGENTCORE_RUNTIME_ARN = os.getenv("AGENTCORE_RUNTIME_ARN", "")
 
 # Citizen email verification (magic link, see app/magic_link.py + app/email_sender.py).
-# Sent via SendGrid rather than SES: SES sandbox mode requires every recipient to
-# be individually pre-verified until AWS grants production access, which defeats
-# the point of letting arbitrary citizens sign in. SendGrid's single-sender
-# verification only requires verifying the sender once, then any recipient works.
+# Sent via Brevo rather than SES or SendGrid: SES sandbox mode requires every
+# recipient to be individually pre-verified (defeats letting arbitrary citizens
+# sign in); SendGrid's "free" tier is a 60-day trial, not permanent. Brevo's free
+# plan (300 emails/day) has neither limitation, and uses the same
+# verify-the-sender-once model — any recipient works after that.
 MAGIC_LINKS_TABLE = os.getenv("MAGIC_LINKS_TABLE", "civicmate-magic-links")
 SENDER_EMAIL = os.getenv("SENDER_EMAIL", "")
-SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY", "")
+BREVO_API_KEY = os.getenv("BREVO_API_KEY", "")
 APP_BASE_URL = os.getenv("APP_BASE_URL", "http://localhost:8000")
 MAGIC_LINK_TTL_SECONDS = 15 * 60
 

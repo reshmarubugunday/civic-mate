@@ -28,8 +28,8 @@ docker run -d --restart unless-stopped -p 8000:8000 \
   -e DYNAMODB_TABLE="civicmate-complaints" \
   -e S3_BUCKET="<YOUR_BUCKET_NAME>" \
   -e MAGIC_LINKS_TABLE="civicmate-magic-links" \
-  -e SENDER_EMAIL="<YOUR_SENDGRID_VERIFIED_SENDER_EMAIL>" \
-  -e SENDGRID_API_KEY="<YOUR_SENDGRID_API_KEY>" \
+  -e SENDER_EMAIL="<YOUR_BREVO_VERIFIED_SENDER_EMAIL>" \
+  -e BREVO_API_KEY="<YOUR_BREVO_API_KEY>" \
   -e APP_BASE_URL="<PUBLIC_URL_e.g._http://this-instances-ip:8000>" \
   -e CIVICMATE_SESSION_SECRET="<GENERATE_WITH_openssl_rand_-hex_32>" \
   -e FORCE_DEMO_ENGINE="0" \

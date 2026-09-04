@@ -99,10 +99,10 @@ if __name__ == "__main__":
     ensure_dynamodb_table()
     ensure_magic_links_table()
     ensure_s3_bucket()
-    if not config.SENDGRID_API_KEY:
+    if not config.BREVO_API_KEY:
         print(
-            "[sendgrid] SENDGRID_API_KEY not set — magic-link emails will log instead of send. "
-            "Verify a sender at app.sendgrid.com (Settings > Sender Authentication) and set "
-            "SENDGRID_API_KEY + SENDER_EMAIL in .env."
+            "[brevo] BREVO_API_KEY not set — magic-link emails will log instead of send. "
+            "Verify a sender at app.brevo.com (Senders, Domains & Dedicated IPs > Senders) "
+            "and set BREVO_API_KEY + SENDER_EMAIL in .env."
         )
     print("\nAWS resources ready. Start the app with: uvicorn app.main:app --reload")

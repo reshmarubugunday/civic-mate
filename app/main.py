@@ -50,7 +50,7 @@ def request_magic_link(payload: dict):
     sent = send_magic_link(email, link_url)
     if sent:
         message = "Check your email for a sign-in link."
-    elif not config.SENDGRID_API_KEY or not config.SENDER_EMAIL:
+    elif not config.BREVO_API_KEY or not config.SENDER_EMAIL:
         message = "Email delivery isn't configured in this environment — check server logs for the link."
     else:
         message = "Email delivery failed unexpectedly — check server logs for the link."
