@@ -1,4 +1,6 @@
+import asyncio
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException, UploadFile
 from fastapi.responses import FileResponse
@@ -12,11 +14,23 @@ from app.dedup import find_duplicate
 from app.email_sender import send_magic_link
 from app.evidence import evidence_store
 from app.models import ApprovalRequest, Complaint, ComplaintCreate, Status
+from app.scheduler import scheduler_loop
 from app.store import store
 
 logging.basicConfig(level=logging.INFO)
 
-app = FastAPI(title="CivicMate AI")
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    task = None
+    if config.AUTONOMOUS_FOLLOWTHROUGH_ENABLED:
+        task = asyncio.create_task(scheduler_loop())
+    yield
+    if task:
+        task.cancel()
+
+
+app = FastAPI(title="CivicMate AI", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
@@ -31,6 +45,7 @@ def health():
         "status": "ok",
         "store": type(store).__name__,
         "evidence_store": type(evidence_store).__name__,
+        "autonomous_followthrough": config.AUTONOMOUS_FOLLOWTHROUGH_ENABLED,
     }
 
 

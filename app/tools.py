@@ -65,6 +65,7 @@ DEFAULT_DEPARTMENT = "General Municipal Services"
 
 ALLOWED_CATEGORIES = {cat for cat, _kw, _dept in CATEGORY_RULES} | {DEFAULT_CATEGORY}
 ALLOWED_PRIORITIES = {"Normal", "High", "Critical / Emergency"}
+ALLOWED_FOLLOWTHROUGH_ACTIONS = {"no_action", "follow_up", "escalate"}
 
 
 def classify_issue(description: str) -> dict:
@@ -105,6 +106,23 @@ def resolve_department(category: str) -> str:
         if cat == category:
             return department
     return DEFAULT_DEPARTMENT
+
+
+def decide_next_action(priority: str, status: str, elapsed_seconds: float,
+                        followup_threshold: float, escalation_threshold: float) -> dict:
+    """Deterministic fallback for autonomous follow-through (app/scheduler.py).
+
+    Critical cases move twice as fast as normal ones — a live wire that's
+    been sitting untouched for six hours deserves more urgency than a
+    pothole in the same window.
+    """
+    urgency_factor = 0.5 if priority == "Critical / Emergency" else 1.0
+
+    if status == "Submitted to mock civic service" and elapsed_seconds >= followup_threshold * urgency_factor:
+        return {"action": "follow_up", "reason": f"No update {int(elapsed_seconds)}s after submission"}
+    if status == "Follow-up sent automatically" and elapsed_seconds >= escalation_threshold * urgency_factor:
+        return {"action": "escalate", "reason": f"No resolution {int(elapsed_seconds)}s after follow-up"}
+    return {"action": "no_action", "reason": "Within normal response window"}
 
 
 def build_complaint_text(description: str, location: str, category: str,

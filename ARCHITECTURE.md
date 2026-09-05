@@ -1,6 +1,6 @@
 # CivicMate AI Architecture
 
-**Current build:** Phase 4.3 · v0.4.3
+**Current build:** Phase 4.4 · v0.4.4
 **Project type:** Citizen-facing civic complaint agent
 **Hackathon:** [Agents for Humans](https://agentsforhumans.devpost.com/) — Good Neighbor Agents track
 **Core principle:** Report once. CivicMate handles the rest — while the citizen remains in control of consequential actions.
@@ -127,7 +127,8 @@ civic-mate/
 |   +-- store.py      DynamoDB store, falls back to in-memory
 |   +-- evidence.py   S3 evidence store, falls back to local disk
 |   +-- tools.py      Deterministic classify/priority/routing logic
-|   +-- agent.py      AgentCore/Bedrock triage with fallback chain + output validation (section 9a)
+|   +-- agent.py      AgentCore/Bedrock triage + follow-through decisions, fallback + validation (section 9a)
+|   +-- scheduler.py  Autonomous follow-up/escalation background loop (section 12a)
 |
 +-- agentcore/
 |   +-- runtime_app.py  AgentCore Runtime entrypoint (section 17a)
@@ -265,6 +266,20 @@ Unchanged in spirit from Phase 3.3, now enriched with the directory verification
 ## 12. Submission Model — BUILT
 
 Unchanged from Phase 3.3. Duplicate approval is blocked (`409`) after submission.
+
+---
+
+## 12a. Autonomous Follow-Through — BUILT
+
+**Gap closed:** follow-up and escalation used to only happen when a human clicked "Simulate follow-up" / "Simulate escalation" — nothing in CivicMate actually kept working after a complaint was submitted, which contradicted the architecture's own principle 4 ("autonomous follow-through") in practice, not just in framing. A judge asking "what does the agent actually do on its own?" had a thin answer: one classification call.
+
+`app/scheduler.py` runs a background loop (started via FastAPI's `lifespan`, cancelled on shutdown) that, on a fixed interval, re-evaluates every approved, open complaint (`Submitted` or `Followed_up` status) and asks the agent — `app/agent.py::assess_followup_action()`, same Bedrock-preferred / deterministic-fallback / whitelist-validated pattern as triage (section 9a) — whether it needs a follow-up or escalation right now, given its priority and how long it's been waiting. If the agent says yes, the loop updates the complaint's status, logs an activity entry explicitly labeled as an autonomous decision (including which engine made it and why), and **emails the citizen** the update via `app/email_sender.py::send_status_update()` — the citizen finds out the same way the decision was made: automatically, without anyone checking.
+
+The deterministic fallback (`app/tools.py::decide_next_action`) moves Critical/Emergency cases twice as fast as Normal ones through the same thresholds, so a live-wire report and a pothole report aren't held to the same patience.
+
+**Verified locally, no button clicked:** a complaint was created and approved, then — with `FOLLOWUP_THRESHOLD_SECONDS=3` / `ESCALATION_THRESHOLD_SECONDS=6` for the test — the activity log showed `Follow-up sent automatically` and then `Escalated by CivicMate AI`, each tagged `autonomous decision (engine=...)`, entirely from the background loop. Production defaults are realistic (`FOLLOWUP_THRESHOLD_SECONDS` 24h, `ESCALATION_THRESHOLD_SECONDS` 72h) — both are overridable via env for a demo where waiting a real day isn't practical.
+
+The manual `/simulate-followup` and `/simulate-escalation` endpoints still exist for direct testing/control; they no longer carry the entire "autonomous follow-through" story by themselves.
 
 ---
 
@@ -480,7 +495,7 @@ Unchanged from Phase 3.3 (English/Tamil initial target). Not started this phase.
 
 ---
 
-## 23. Current Phase 4.3 Scope
+## 23. Current Phase 4.4 Scope
 
 Included and verified this phase:
 
@@ -496,6 +511,9 @@ Category/priority whitelist validation on all model output
 Duplicate complaint detection and merge
 Minimal verified-sender alerts feed
 Ownership enforcement on approve/follow-up/escalate
+Autonomous follow-through: a background loop where the agent itself decides whether an
+  open complaint needs a follow-up or escalation, instead of a human clicking a button,
+  including automatically emailing the citizen the update (section 12a)
 AgentCore Runtime deployment path (container built and tested; see 17a)
 Live deployment on EC2 with real DynamoDB/S3/Bedrock (App Runner blocked at account level; see 19a)
 Real Bedrock inference confirmed working, including two bugs found only by live testing:
@@ -513,7 +531,7 @@ Still not production-connected (unchanged from Phase 3.3, plus new items):
 Real government complaint submission
 Production-grade email deliverability — sender is a verified individual Gmail address, not an
   audited domain with SPF/DKIM/DMARC, so some providers may filter it to spam; Brevo's free
-  tier also caps at 100 emails/day (section 19b)
+  tier also caps at 300 emails/day (section 19b)
 Real (audited) government email directory — current directory is a seed, not an audited registry
 Geocoded duplicate detection (current match is exact-string location)
 DynamoDB GSI for per-citizen queries (current listing is a full scan filtered in Python)
@@ -533,7 +551,7 @@ Mobile app
 1. **Citizen control** — AI prepares and automates work, but the citizen approves consequential actions, and only the citizen who owns a case can act on it (section 8).
 2. **Transparency** — category, department, recipient (with verification status), CC, attachments, status, and AI engine are all shown before approval.
 3. **Auditability** — every state-changing action, including duplicate merges, is recorded in case history.
-4. **Autonomous follow-through** — CivicMate doesn't stop after generating complaint text; it tracks, follows up, and escalates.
+4. **Autonomous follow-through** — CivicMate doesn't stop after generating complaint text; a background agent loop (section 12a) decides on its own, without a human clicking anything, when a case needs a follow-up or escalation, and tells the citizen automatically.
 5. **Safe fallback behavior** — every AWS integration point degrades to a local equivalent and says so explicitly (`engine`, `/health`); nothing pretends to be Bedrock/DynamoDB/S3 when it isn't.
 6. **Adversarial-input defense** — citizen-supplied text is data, never instructions; anything the model returns that could affect routing is validated or recomputed server-side (section 9a).
 7. **API-first evolution** — the same backend supports web, mobile, and future civic-service integrations via header-based auth rather than cookies.
@@ -554,8 +572,8 @@ Duplicate detection             WORKING (exact-location match; no geocoding yet)
 Photo upload                    WORKING (local fallback verified; S3 wired, needs bucket/creds)
 Citizen approval                WORKING
 Mock submission                 WORKING
-Follow-up simulation            WORKING
-Escalation simulation           WORKING
+Autonomous follow-up/escalation WORKING (agent decides on a background loop — section 12a)
+Manual follow-up/escalation     WORKING (direct-control endpoints, no longer the only path)
 Per-citizen dashboard           WORKING
 Refresh feedback                WORKING
 Verified alerts feed            WORKING (seed data, not live ingestion)
@@ -569,7 +587,6 @@ Live deployment (EC2)           WORKING / LIVE (section 19a)
 App Runner deploy               BLOCKED / AWS ACCOUNT NOT YET ACTIVATED FOR THE SERVICE (section 19a)
 AgentCore Runtime               CODE READY / NOT YET DEPLOYED (section 17a)
 DynamoDB GSI for citizen query  PLANNED (currently full scan, filtered in Python)
-Verified citizen identity       PLANNED (magic link / OTP)
 Real civic integration          FUTURE
 Mobile app                      FUTURE
 Full government alerts pipeline FUTURE (current version is a scoped-down MVP)
@@ -578,4 +595,4 @@ Full government alerts pipeline FUTURE (current version is a scoped-down MVP)
 ---
 
 **Document updated:** 3 September 2026 (deployment session)
-**Architecture baseline:** CivicMate AI Phase 4.3
+**Architecture baseline:** CivicMate AI Phase 4.4
